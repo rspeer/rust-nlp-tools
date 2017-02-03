@@ -1,0 +1,14 @@
+[package]
+name = "language-codes"
+version = "0.1.0"
+authors = ["Rob Speer <rob@luminoso.com>"]
+license = "MIT"
+build = "build.rs"
+
+[build-dependencies]
+phf_codegen = "*"
+json = "*"
+
+[dependencies]
+lazy_static = "*"
+phf = "*"
