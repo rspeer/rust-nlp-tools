@@ -105,13 +105,11 @@ impl LanguageTag {
         }
     }
 
-
     /// This internal function parses a string slice into a LanguageTag,
     /// assuming that it's already been normalized into the character range
     /// [-0-9a-z].
-    fn parse_normalized(s: &str) -> Result<LanguageTag, LanguageTagError> {
+    fn parse_normalized_into(mut target: &mut [u8; 10], s: &str) -> Result<(), LanguageTagError> {
         let mut parts = s.split("-");
-        let mut lang_bytes: [u8; 10] = [PAD; 10];
 
         // Consume the first part, which we know must be a language
         match parts.nth(0) {
@@ -121,12 +119,12 @@ impl LanguageTag {
             //
             // TODO: map private-use tags onto the [qaa-qtz] range instead.
             Some("i") | Some("x") => {
-                write_into_fixed(&mut lang_bytes, "mis", 0, 3);
+                write_into_fixed(&mut target, "mis", 0, 3);
             }
             Some("und") => {}
             Some(language_ref) => {
                 if check_characters(language_ref) {
-                    write_into_fixed(&mut lang_bytes, language_ref, 0, 3);
+                    write_into_fixed(&mut target, language_ref, 0, 3);
                 } else {
                     return Err(LanguageTagError::InvalidCharacter);
                 }
@@ -153,14 +151,14 @@ impl LanguageTag {
             } else if (language_state >= 0 || state == ParserState::AfterScript) &&
                       is_region(subtag_ref) {
                 let region_val = subtag_ref.to_uppercase();
-                write_into_fixed(&mut lang_bytes, &region_val, 7, 3);
+                write_into_fixed(&mut target, &region_val, 7, 3);
                 state = ParserState::AfterRegion;
             } else if language_state >= 0 && is_script(subtag_ref) {
                 let (first_letter, rest_letters) = subtag_ref.split_at(1);
                 let first_letter_string: String = first_letter.to_uppercase();
                 let rest_letters_string: String = rest_letters.to_lowercase();
                 let script_val = first_letter_string + &rest_letters_string;
-                write_into_fixed(&mut lang_bytes, &script_val, 3, 4);
+                write_into_fixed(&mut target, &script_val, 3, 4);
                 state = ParserState::AfterScript;
             } else if language_state >= 0 && language_state < 3 && is_extlang(subtag_ref) {
                 // This is an extlang; discard it and just count the fact that
@@ -170,7 +168,24 @@ impl LanguageTag {
                 return Err(LanguageTagError::SubtagFormError);
             }
         }
-        return Ok(LanguageTag { data: lang_bytes });
+        Ok(())
+    }
+
+    fn parse_into(mut target: &mut [u8; 10], s: &str) -> Result<(), LanguageTagError> {
+        let normal_tag: String = s.replace("_", "-").to_lowercase();
+        LanguageTag::parse_normalized_into(&mut target, &normal_tag)
+    }
+
+    pub fn parse(s: &str) -> Result<LanguageTag, LanguageTagError> {
+        let mut lang_bytes: [u8; 10] = [PAD; 10];
+        LanguageTag::parse_into(&mut lang_bytes, &s)?;
+        Ok(LanguageTag { data: lang_bytes })
+    }
+
+    pub fn parse_over(tag: LanguageTag, s: &str) -> Result<LanguageTag, LanguageTagError> {
+        let mut lang_bytes: [u8; 10] = tag.data;
+        LanguageTag::parse_into(&mut lang_bytes, &s)?;
+        Ok(LanguageTag { data: lang_bytes })
     }
 }
 
@@ -182,8 +197,7 @@ impl FromStr for LanguageTag {
     /// is a constant-sized Struct that encodes its language, script, and
     /// region.
     fn from_str(s: &str) -> Result<LanguageTag, LanguageTagError> {
-        let normal_tag: String = s.replace("_", "-").to_lowercase();
-        LanguageTag::parse_normalized(&normal_tag)
+        LanguageTag::parse(&s)
     }
 }
 
