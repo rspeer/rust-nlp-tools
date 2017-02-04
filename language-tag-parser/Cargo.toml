@@ -1,0 +1,6 @@
+[package]
+name = "language-tag-parser"
+version = "0.1.0"
+authors = ["Rob Speer <rob@luminoso.com>"]
+
+[dependencies]

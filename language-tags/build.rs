@@ -1,4 +1,5 @@
 extern crate phf_codegen;
+extern crate language_tag_parser;
 extern crate json;
 
 use std::env;
@@ -6,7 +7,8 @@ use std::path::Path;
 use std::io::prelude::*;
 use std::io::{BufWriter, Error};
 use std::fs::File;
-
+use std::str::from_utf8;
+use language_tag_parser::LanguageTag;
 
 fn read_json(filename: &str) -> Result<json::JsonValue, Error> {
     let mut f = File::open(filename)?;
@@ -14,7 +16,6 @@ fn read_json(filename: &str) -> Result<json::JsonValue, Error> {
     f.read_to_string(&mut target_str)?;
     Ok(json::parse(&target_str).unwrap())
 }
-
 
 fn make_tables() -> Result<(), Error> {
     let out_path = Path::new(&env::var("OUT_DIR").unwrap()).join("langdata.rs");
@@ -28,9 +29,8 @@ fn make_tables() -> Result<(), Error> {
     // for the language subtag and for the entire tag. If they replace the
     // language subtag, they may need to be re-parsed. Make them lowercase,
     // so that they're already normalized for the parser.
-    write!(&mut out_file, "extern crate phf;\n").unwrap();
     write!(&mut out_file,
-           "pub static LANG_REPLACE: phf::Map<&'static str, &'static str> = ")?;
+           "pub static LANG_REPLACE: ::phf::Map<&'static str, &'static str> = ")?;
     for pair in language_aliases.entries() {
         let (key, val) = pair;
         let replacement = val["_replacement"].to_string().to_lowercase();
@@ -45,7 +45,7 @@ fn make_tables() -> Result<(), Error> {
     let ref region_aliases = parsed["supplemental"]["metadata"]["alias"]["territoryAlias"];
     let mut builder = phf_codegen::Map::new();
     write!(&mut out_file,
-           "pub static REGION_REPLACE: phf::Map<&'static str, &'static str> = ")?;
+           "pub static REGION_REPLACE: ::phf::Map<&'static str, &'static str> = ")?;
     for pair in region_aliases.entries() {
         let (key, val) = pair;
         let replacement = val["_replacement"].to_string();
@@ -58,6 +58,21 @@ fn make_tables() -> Result<(), Error> {
                 builder.entry(key.to_uppercase(), &val_literal);
             }
         }
+    }
+    builder.build(&mut out_file).unwrap();
+    write!(&mut out_file, ";\n")?;
+
+    let parsed = read_json("data/likelySubtags.json")?;
+    let ref likely_subtags = parsed["supplemental"]["likelySubtags"];
+    let mut builder = phf_codegen::Map::new();
+    write!(&mut out_file,
+           "pub static LIKELY_SUBTAGS: ::phf::Map<[u8; 10], [u8; 10]> = ")?;
+    for pair in likely_subtags.entries() {
+        let (key, val) = pair;
+        let from_tag = LanguageTag::parse(key).unwrap().internal_bytes();
+        let to_val: &str = &val.to_string();
+        let to_tag = LanguageTag::parse(&to_val).unwrap().as_literal();
+        builder.entry(from_tag, &to_tag);
     }
     builder.build(&mut out_file).unwrap();
     write!(&mut out_file, ";\n")?;

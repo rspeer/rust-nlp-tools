@@ -1,5 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
+extern crate phf;
+
 use std::str::{FromStr, from_utf8_unchecked};
 pub mod languages;
 mod langdata;
@@ -28,6 +30,10 @@ enum ParserState {
     AfterVariant,
 }
 
+/// LanguageTags are immutable, Sized, and passed by value. Think of them
+/// as a big enum, not as a string. Each one takes up 10 bytes.
+///
+///
 #[derive(PartialEq, Debug)]
 pub struct LanguageTag {
     data: [u8; 10],

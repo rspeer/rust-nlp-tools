@@ -12,3 +12,6 @@ json = "*"
 [dependencies]
 lazy_static = "*"
 phf = "*"
+
+[build-dependencies.language-tag-parser]
+path = "../language-tag-parser"
