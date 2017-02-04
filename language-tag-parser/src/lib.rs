@@ -35,15 +35,12 @@ pub struct LanguageTag {
 }
 
 impl LanguageTag {
-    pub fn internal_bytes(&self) -> [u8; 10] {
-        self.data
-    }
-
-    /// This internal function parses a string slice into a 10-byte buffer
-    /// that can be turned into a LanguageTag, assuming that the tag has
-    /// already been normalized into the character range [-0-9a-z].
-    fn parse_raw_into(mut target: &mut [u8; 10], s: &str) -> Result<(), LanguageTagError> {
-        let mut parts = s.split("-");
+    /// This internal function parses a string slice into a LanguageTag,
+    /// assuming that the tag has already been normalized into the character
+    /// range [-0-9a-z].
+    fn parse_raw(tag: &str) -> Result<LanguageTag, LanguageTagError> {
+        let mut parts = tag.split("-");
+        let mut target: [u8; 10] = [PAD; 10];
 
         // Consume the first part, which we know must be a language
         match parts.nth(0) {
@@ -100,14 +97,16 @@ impl LanguageTag {
                 return Err(LanguageTagError::SubtagFormatError);
             }
         }
-        Ok(())
+        Ok(LanguageTag { data: target })
     }
 
     pub fn parse(tag: &str) -> Result<LanguageTag, LanguageTagError> {
-        let mut lang_bytes: [u8; 10] = [PAD; 10];
         let normal_tag: String = tag.replace("_", "-").to_lowercase();
-        LanguageTag::parse_raw_into(&mut lang_bytes, &normal_tag)?;
-        Ok(LanguageTag { data: lang_bytes })
+        Ok(LanguageTag::parse_raw(&normal_tag)?)
+    }
+
+    pub fn internal_bytes(&self) -> [u8; 10] {
+        self.data
     }
 
     pub fn as_literal(&self) -> String {

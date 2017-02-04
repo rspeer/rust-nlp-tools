@@ -7,7 +7,6 @@ use std::path::Path;
 use std::io::prelude::*;
 use std::io::{BufWriter, Error};
 use std::fs::File;
-use std::str::from_utf8;
 use language_tag_parser::LanguageTag;
 
 fn read_json(filename: &str) -> Result<json::JsonValue, Error> {
