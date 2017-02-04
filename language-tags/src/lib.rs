@@ -34,56 +34,17 @@ pub struct LanguageTag {
 }
 
 impl LanguageTag {
-    pub fn new(language: Option<&str>, script: Option<&str>, region: Option<&str>) -> LanguageTag {
-        let mut lang_bytes: [u8; 10] = [PAD; 10];
-        if let Some(lang_str) = language {
-            write_into_fixed(&mut lang_bytes, lang_str, 0, 3);
-        }
-        if let Some(script_str) = script {
-            write_into_fixed(&mut lang_bytes, script_str, 3, 4)
-        }
-        if let Some(region_str) = region {
-            write_into_fixed(&mut lang_bytes, region_str, 7, 3)
-        }
-        LanguageTag { data: lang_bytes }
-    }
-
-    /// Construct a LanguageTag quickly from a string slice representing
-    /// specifically the language, with no other information such as region
-    /// or variant.
-    ///
-    /// `language` must consist of 2 or 3 lowercase ASCII letters.
-    pub fn from_language_subtag(language: &str) -> LanguageTag {
-        LanguageTag::new(Some(language), None, None)
-    }
-
-    /// Construct a LanguageTag that provides no information.
-    pub fn empty() -> LanguageTag {
-        LanguageTag::new(None, None, None)
-    }
-
     /// Get the 2- or 3-character language code as a String, giving "und" if
     /// the language is unknown.
     pub fn language_code(&self) -> String {
-        unsafe {
-            match self.data[0] {
-                PAD => "und".to_string(),
-                _ => from_utf8_unchecked(&self.data[0..3]).trim_right_matches(' ').to_string(),
-            }
-        }
+        unsafe { from_utf8_unchecked(&self.data[0..3]).trim_right_matches(' ').to_string() }
     }
 
     /// Get the 2- or 3-character language code as an Option<String>, giving
     /// None if the language is unknown.
     pub fn get_language(&self) -> Option<String> {
-        unsafe {
-            match self.data[0] {
-                PAD => None,
-                _ => {
-                    Some(from_utf8_unchecked(&self.data[0..3]).trim_right_matches(' ').to_string())
-                }
-            }
-        }
+        let code = self.language_code();
+        if code == "und" { None } else { Some(code) }
     }
 
     /// Get the 4-character script code as an Option<String>, giving None
@@ -146,7 +107,6 @@ impl LanguageTag {
             Some("i") | Some("x") => {
                 write_into_fixed(&mut target, "mis", 0, 3);
             }
-            Some("und") => {}
             Some(language_ref) => {
                 if !check_characters(language_ref) {
                     return Err(LanguageTagError::InvalidCharacter);
@@ -293,12 +253,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        let tag: LanguageTag = LanguageTag::empty();
-        assert_eq!(tag.language_code(), "und");
-    }
-
-    #[test]
     fn test_parse() {
         let tag: LanguageTag = "zh-hant-tw".parse().unwrap();
         assert_eq!(tag.language_code(), "zh");
@@ -337,6 +291,12 @@ mod tests {
 
     #[test]
     fn test_named() {
+        let ref tag: LanguageTag = languages::UNKNOWN;
+        assert_eq!(tag.language_code(), "und");
+
+        let tag: LanguageTag = "und".parse().unwrap();
+        assert_eq!(tag, languages::UNKNOWN);
+
         let tag: LanguageTag = "zh-hans".parse().unwrap();
         assert_eq!(tag, languages::SIMPLIFIED_CHINESE);
 
