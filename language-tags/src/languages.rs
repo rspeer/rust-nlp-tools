@@ -122,11 +122,11 @@ pub static CHINESE                : LanguageTag = LanguageTag { data: *b"zh     
 pub static MANDARIN_CHINESE       : LanguageTag = LanguageTag { data: *b"zh        " };
 pub static SIMPLIFIED_CHINESE     : LanguageTag = LanguageTag { data: *b"zh Hans   " };
 pub static TRADITIONAL_CHINESE    : LanguageTag = LanguageTag { data: *b"zh Hant   " };
-pub static MAINLAND_CHINESE       : LanguageTag = LanguageTag { data: *b"zh     CN " };
-pub static HONG_KONG_CHINESE      : LanguageTag = LanguageTag { data: *b"zh     HK " };
-pub static MACAU_CHINESE          : LanguageTag = LanguageTag { data: *b"zh     MO " };
-pub static SINGAPOREAN_CHINESE    : LanguageTag = LanguageTag { data: *b"zh     SG " };
-pub static TAIWANESE_CHINESE      : LanguageTag = LanguageTag { data: *b"zh     TW " };
+pub static MAINLAND_CHINESE       : LanguageTag = LanguageTag { data: *b"zh HansCN " };
+pub static HONG_KONG_CHINESE      : LanguageTag = LanguageTag { data: *b"zh HantHK " };
+pub static MACAU_CHINESE          : LanguageTag = LanguageTag { data: *b"zh HantMO " };
+pub static SINGAPOREAN_CHINESE    : LanguageTag = LanguageTag { data: *b"zh HansSG " };
+pub static TAIWANESE_CHINESE      : LanguageTag = LanguageTag { data: *b"zh HantTW " };
 pub static ZULU                   : LanguageTag = LanguageTag { data: *b"zu        " };
 
 pub static UNKNOWN                : LanguageTag = LanguageTag { data: *b"und       " };

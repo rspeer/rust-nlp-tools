@@ -148,10 +148,13 @@ impl LanguageTag {
             }
             Some("und") => {}
             Some(language_ref) => {
-                if check_characters(language_ref) {
-                    write_into_fixed(&mut target, language_ref, 0, 3);
-                } else {
+                if !check_characters(language_ref) {
                     return Err(LanguageTagError::InvalidCharacter);
+                }
+                // Handle replacements for just the language subtag
+                match langdata::REPLACEMENTS.get(language_ref) {
+                    Some(&repl) => LanguageTag::parse_into(&mut target, &repl).unwrap(),
+                    None => write_into_fixed(&mut target, language_ref, 0, 3),
                 }
             }
             None => {
@@ -314,11 +317,19 @@ mod tests {
     fn test_replacement() {
         parses_as("sh-ME", "sr-Latn-ME");
         parses_as("sh-Cyrl", "sr-Cyrl");
+        parses_as("sgn-be-fr", "sfb");
+        parses_as("no-bokmal", "nb");
+        parses_as("mn-Cyrl-MN", "mn-MN");
+        parses_as("zh-CN", "zh-Hans-CN");
+        parses_as("i-hak", "hak");
     }
 
     #[test]
     fn test_named() {
         let tag: LanguageTag = "zh-hans".parse().unwrap();
         assert_eq!(tag, languages::SIMPLIFIED_CHINESE);
+
+        let tag: LanguageTag = "zh-hant-hk".parse().unwrap();
+        assert_eq!(tag, languages::HONG_KONG_CHINESE);
     }
 }
