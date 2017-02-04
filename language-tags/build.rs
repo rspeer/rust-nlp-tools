@@ -16,18 +16,21 @@ fn read_json(filename: &str) -> Result<json::JsonValue, Error> {
 }
 
 
-fn make_stuff() -> Result<(), Error> {
-    let out_path = Path::new(&env::var("OUT_DIR").unwrap()).join("replacements.rs");
+fn make_tables() -> Result<(), Error> {
+    let out_path = Path::new(&env::var("OUT_DIR").unwrap()).join("langdata.rs");
     let mut out_file = BufWriter::new(File::create(&out_path)?);
 
     let parsed = read_json("data/aliases.json")?;
     let ref contents = parsed["supplemental"]["metadata"]["alias"]["languageAlias"];
     let mut builder = phf_codegen::Map::new();
 
-    write!(&mut out_file, "static REPLACEMENTS: phf::Map<&'static str, &'static str> = ")?;
+    write!(&mut out_file, "extern crate phf;\n").unwrap();
+    write!(&mut out_file,
+           "pub static REPLACEMENTS: phf::Map<&'static str, &'static str> = ")?;
     for pair in contents.entries() {
         let (key, val) = pair;
-        let val_literal = format!("\"{}\"", val["_replacement"].to_string().to_lowercase());
+        let replacement = val["_replacement"].to_string().to_lowercase();
+        let val_literal = format!("\"{}\"", replacement);
         builder.entry(key.to_lowercase(), &val_literal);
     }
     builder.build(&mut out_file).unwrap();
@@ -36,5 +39,5 @@ fn make_stuff() -> Result<(), Error> {
 }
 
 fn main() {
-    make_stuff().unwrap();
+    make_tables().unwrap();
 }

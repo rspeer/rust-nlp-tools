@@ -2,6 +2,7 @@
 extern crate lazy_static;
 use std::str::{FromStr, from_utf8_unchecked};
 pub mod languages;
+mod langdata;
 
 // Tag data is padded with spaces
 const PAD: u8 = 0x20;
@@ -13,7 +14,7 @@ pub enum LanguageTagError {
 
     // The subtag we're parsing has an unexpected shape, or came in the
     // wrong order
-    SubtagFormError,
+    SubtagFormatError,
 
     // We can't even parse a subtag from here
     ParseError,
@@ -85,6 +86,9 @@ impl LanguageTag {
         }
     }
 
+    /// Get the 4-character script code as an Option<String>, giving None
+    /// if the script is unset. This returns None in the case of an implicit
+    /// script: that is, the script of code `en` is `None`, not `Some("Latn")`.
     pub fn get_script(&self) -> Option<String> {
         unsafe {
             match self.data[3] {
@@ -94,6 +98,9 @@ impl LanguageTag {
         }
     }
 
+    /// Get the region code as an Option<String>. It will contain a 2-letter
+    /// ISO region code or a 3-digit number, or it will be None if the region
+    /// is unset.
     pub fn get_region(&self) -> Option<String> {
         unsafe {
             match self.data[7] {
@@ -105,10 +112,28 @@ impl LanguageTag {
         }
     }
 
-    /// This internal function parses a string slice into a LanguageTag,
-    /// assuming that it's already been normalized into the character range
-    /// [-0-9a-z].
-    fn parse_normalized_into(mut target: &mut [u8; 10], s: &str) -> Result<(), LanguageTagError> {
+    pub fn to_string(&self) -> String {
+        let lang: String = self.language_code();
+        match self.get_script() {
+            Some(script) => {
+                match self.get_region() {
+                    Some(region) => format!("{}-{}-{}", lang, script, region),
+                    None => format!("{}-{}", lang, script),
+                }
+            }
+            None => {
+                match self.get_region() {
+                    Some(region) => format!("{}-{}", lang, region),
+                    None => lang,
+                }
+            }
+        }
+    }
+
+    /// This internal function parses a string slice into a 10-byte buffer
+    /// that can be turned into a LanguageTag, assuming that the tag has
+    /// already been normalized into the character range [-0-9a-z].
+    fn parse_into(mut target: &mut [u8; 10], s: &str) -> Result<(), LanguageTagError> {
         let mut parts = s.split("-");
 
         // Consume the first part, which we know must be a language
@@ -165,27 +190,46 @@ impl LanguageTag {
                 // it was parsed.
                 state = ParserState::AfterLanguage(language_state + 1);
             } else {
-                return Err(LanguageTagError::SubtagFormError);
+                return Err(LanguageTagError::SubtagFormatError);
             }
         }
         Ok(())
     }
 
-    fn parse_into(mut target: &mut [u8; 10], s: &str) -> Result<(), LanguageTagError> {
-        let normal_tag: String = s.replace("_", "-").to_lowercase();
-        LanguageTag::parse_normalized_into(&mut target, &normal_tag)
+    fn parse_revision(&self, tag: &str) -> Result<LanguageTag, LanguageTagError> {
+        let mut lang_bytes: [u8; 10] = self.data;
+        LanguageTag::parse_into(&mut lang_bytes, &tag)?;
+        Ok(LanguageTag { data: lang_bytes })
     }
 
-    pub fn parse(s: &str) -> Result<LanguageTag, LanguageTagError> {
+    pub fn parse(tag: &str) -> Result<LanguageTag, LanguageTagError> {
         let mut lang_bytes: [u8; 10] = [PAD; 10];
-        LanguageTag::parse_into(&mut lang_bytes, &s)?;
-        Ok(LanguageTag { data: lang_bytes })
-    }
-
-    pub fn parse_over(tag: LanguageTag, s: &str) -> Result<LanguageTag, LanguageTagError> {
-        let mut lang_bytes: [u8; 10] = tag.data;
-        LanguageTag::parse_into(&mut lang_bytes, &s)?;
-        Ok(LanguageTag { data: lang_bytes })
+        let normal_tag: String = tag.replace("_", "-").to_lowercase();
+        let slice_tag: &str = &normal_tag;
+        match langdata::REPLACEMENTS.get(slice_tag) {
+            Some(&repl) => {
+                LanguageTag::parse_into(&mut lang_bytes, &repl)?;
+                Ok(LanguageTag { data: lang_bytes })
+            }
+            None => {
+                LanguageTag::parse_into(&mut lang_bytes, slice_tag)?;
+                let mut result = LanguageTag { data: lang_bytes };
+                match result.get_language() {
+                    Some(subtag) => {
+                        let subtag_slice: &str = &subtag;
+                        match langdata::REPLACEMENTS.get(subtag_slice) {
+                            Some(&repl) => {
+                                LanguageTag::parse_into(&mut lang_bytes, repl).unwrap();
+                                result = result.parse_revision(&repl)?;
+                            }
+                            None => {}
+                        }
+                    }
+                    None => {}
+                }
+                Ok(result)
+            }
+        }
     }
 }
 
@@ -254,11 +298,22 @@ mod tests {
 
     #[test]
     fn test_parse() {
-        if let Ok(tag) = "zh-hant-tw".parse::<LanguageTag>() {
-            assert_eq!(tag.language_code(), "zh");
-            assert_eq!(tag.get_script(), Some("Hant".to_string()));
-            assert_eq!(tag.get_region(), Some("TW".to_string()));
-        }
+        let tag: LanguageTag = "zh-hant-tw".parse().unwrap();
+        assert_eq!(tag.language_code(), "zh");
+        assert_eq!(tag.get_script(), Some("Hant".to_string()));
+        assert_eq!(tag.get_region(), Some("TW".to_string()));
+        assert_eq!(tag.to_string(), "zh-Hant-TW".to_string());
+    }
+
+    fn parses_as(input: &str, result: &str) {
+        let tag: LanguageTag = input.parse().unwrap();
+        assert_eq!(tag.to_string(), result.to_string());
+    }
+
+    #[test]
+    fn test_replacement() {
+        parses_as("sh-ME", "sr-Latn-ME");
+        parses_as("sh-Cyrl", "sr-Cyrl");
     }
 
     #[test]
