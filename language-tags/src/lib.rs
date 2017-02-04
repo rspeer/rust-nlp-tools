@@ -152,7 +152,7 @@ impl LanguageTag {
                     return Err(LanguageTagError::InvalidCharacter);
                 }
                 // Handle replacements for just the language subtag
-                match langdata::REPLACEMENTS.get(language_ref) {
+                match langdata::LANG_REPLACE.get(language_ref) {
                     Some(&repl) => LanguageTag::parse_into(&mut target, &repl).unwrap(),
                     None => write_into_fixed(&mut target, language_ref, 0, 3),
                 }
@@ -178,14 +178,27 @@ impl LanguageTag {
                 state = ParserState::AfterVariant;
             } else if (language_state >= 0 || state == ParserState::AfterScript) &&
                       is_region(subtag_ref) {
-                let region_val = subtag_ref.to_uppercase();
+                let mut region_val = subtag_ref.to_uppercase();
+
+                // Handle replacements for the region subtag
+                match langdata::REGION_REPLACE.get(&region_val as &str) {
+                    Some(&repl) => {
+                        region_val = repl.to_uppercase();
+                    }
+                    None => {}
+                }
                 write_into_fixed(&mut target, &region_val, 7, 3);
                 state = ParserState::AfterRegion;
             } else if language_state >= 0 && is_script(subtag_ref) {
                 let (first_letter, rest_letters) = subtag_ref.split_at(1);
                 let first_letter_string: String = first_letter.to_uppercase();
                 let rest_letters_string: String = rest_letters.to_lowercase();
-                let script_val = first_letter_string + &rest_letters_string;
+                let mut script_val = first_letter_string + &rest_letters_string;
+
+                // There is only one script replacement, as of CLDR v30
+                if script_val == "Qaai" {
+                    script_val = "Zinh".to_string();
+                }
                 write_into_fixed(&mut target, &script_val, 3, 4);
                 state = ParserState::AfterScript;
             } else if language_state >= 0 && language_state < 3 && is_extlang(subtag_ref) {
@@ -199,38 +212,17 @@ impl LanguageTag {
         Ok(())
     }
 
-    fn parse_revision(&self, tag: &str) -> Result<LanguageTag, LanguageTagError> {
-        let mut lang_bytes: [u8; 10] = self.data;
-        LanguageTag::parse_into(&mut lang_bytes, &tag)?;
-        Ok(LanguageTag { data: lang_bytes })
-    }
-
     pub fn parse(tag: &str) -> Result<LanguageTag, LanguageTagError> {
         let mut lang_bytes: [u8; 10] = [PAD; 10];
         let normal_tag: String = tag.replace("_", "-").to_lowercase();
-        let slice_tag: &str = &normal_tag;
-        match langdata::REPLACEMENTS.get(slice_tag) {
+        match langdata::LANG_REPLACE.get(&normal_tag as &str) {
             Some(&repl) => {
                 LanguageTag::parse_into(&mut lang_bytes, &repl)?;
                 Ok(LanguageTag { data: lang_bytes })
             }
             None => {
-                LanguageTag::parse_into(&mut lang_bytes, slice_tag)?;
-                let mut result = LanguageTag { data: lang_bytes };
-                match result.get_language() {
-                    Some(subtag) => {
-                        let subtag_slice: &str = &subtag;
-                        match langdata::REPLACEMENTS.get(subtag_slice) {
-                            Some(&repl) => {
-                                LanguageTag::parse_into(&mut lang_bytes, repl).unwrap();
-                                result = result.parse_revision(&repl)?;
-                            }
-                            None => {}
-                        }
-                    }
-                    None => {}
-                }
-                Ok(result)
+                LanguageTag::parse_into(&mut lang_bytes, &normal_tag)?;
+                Ok(LanguageTag { data: lang_bytes })
             }
         }
     }
@@ -257,9 +249,12 @@ fn is_extension(subtag: &str) -> bool {
 }
 
 fn is_variant(subtag: &str) -> bool {
-    match subtag.chars().nth(0) {
-        Some(ch) => ch.is_digit(10) || subtag.len() >= 5,
-        None => false,
+    if subtag.len() == 4 {
+        subtag.chars().nth(0).unwrap().is_digit(10)
+    } else if subtag.len() >= 5 {
+        true
+    } else {
+        false
     }
 }
 
@@ -276,7 +271,11 @@ fn is_script(subtag: &str) -> bool {
 }
 
 fn is_extlang(subtag: &str) -> bool {
-    subtag.len() == 3
+    if subtag.len() == 3 {
+        !subtag.chars().nth(0).unwrap().is_digit(10)
+    } else {
+        false
+    }
 }
 
 fn write_into_fixed(arr: &mut [u8; 10], s: &str, offset: usize, length: usize) {
@@ -308,6 +307,12 @@ mod tests {
         assert_eq!(tag.to_string(), "zh-Hant-TW".to_string());
     }
 
+    #[test]
+    fn test_region() {
+        assert!(is_region("gb"));
+        assert!(is_region("419"));
+    }
+
     fn parses_as(input: &str, result: &str) {
         let tag: LanguageTag = input.parse().unwrap();
         assert_eq!(tag.to_string(), result.to_string());
@@ -322,6 +327,12 @@ mod tests {
         parses_as("mn-Cyrl-MN", "mn-MN");
         parses_as("zh-CN", "zh-Hans-CN");
         parses_as("i-hak", "hak");
+        parses_as("en-UK", "en-GB");
+        parses_as("es-419", "es-419");
+        parses_as("en-840", "en-US");
+        parses_as("de-DD", "de-DE");
+        parses_as("sh-QU", "sr-Latn-EU");
+        parses_as("und-Qaai", "und-Zinh");
     }
 
     #[test]
