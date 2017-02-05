@@ -1,10 +1,60 @@
-//! A simple implementation of language tag parsing that uses no external
-//! data, because we need it to generate that external data.
+pub const LANGUAGE_MASK: u64 = 0x00ff_ff00_0000_0000_u64;
+pub const SCRIPT_MASK: u64 = 0x0000_00ff_ffff_0000_u64;
+pub const REGION_MASK: u64 = 0x0000_0000_0000_ffff_u64;
+pub const LANGUAGE_SHIFT: u64 = 40u64;
+pub const SCRIPT_SHIFT: u64 = 16u64;
 
-use std::str::from_utf8;
+pub const EMPTY_CODE: u64 = 0u64;
+pub const MISSING_CODE: u64 = 14974248858681344u64;
 
-// Tag data is padded with spaces
-const PAD: u8 = 0x20;
+/// There are three ranges of values a subtag could be
+/// encoded as:
+///
+/// * 0: the subtag is undetermined or unspecified (and therefore isn't being
+///   passed to this function)
+/// * 1-999: the subtag is a 3-digit number (used for region codes)
+/// * 1000 or more: the subtag is made of letters, which will be encoded with
+///   five bits each
+fn decode_subtag(val: u64) -> Option<String> {
+    if val == 0 {
+        None
+    } else if val < 1000 {
+        Some(format!("{number:>0width$}", number = val, width = 3))
+    } else {
+        let mut chars: Vec<char> = Vec::with_capacity(4);
+        let mut remain = val - 1000;
+        while remain > 0 {
+            let charnum: u64 = remain % 32;
+            if charnum > 0 {
+                let ch = (96u64 + charnum) as u8 as char;
+                chars.push(ch);
+            }
+            remain >>= 5;
+        }
+        chars.reverse();
+        Some(chars.into_iter().collect::<String>())
+    }
+}
+
+/// Encode a subtag using the scheme described for `decode_subtag`.
+/// This does not take an Option -- you should encode None separately.
+/// It does take a length to pad alphabetic subtags to, so that,
+/// for example, "enm" sorts before "es".
+fn encode_subtag(subtag: &str, length: usize) -> u64 {
+    match subtag.parse::<u64>() {
+        Ok(val) => val,
+        _ => {
+            let mut val: u64 = 0;
+            for ch in subtag.chars() {
+                val <<= 5;
+                val += ((ch as u8) - 96u8) as u64;
+            }
+            val <<= 5 * (length - subtag.len());
+            val + 1000
+        }
+    }
+}
+
 
 #[derive(PartialEq, Debug)]
 pub enum LanguageTagError {
@@ -27,92 +77,90 @@ enum ParserState {
     AfterVariant,
 }
 
-/// LanguageTags are immutable, Sized, and passed by value. Think of them
-/// as a big enum, not as a string. Each one takes up 10 bytes.
-#[derive(PartialEq, Debug)]
-pub struct LanguageTag {
-    data: [u8; 10],
-}
 
-impl LanguageTag {
-    /// This internal function parses a string slice into a LanguageTag,
-    /// assuming that the tag has already been normalized into the character
-    /// range [-0-9a-z].
-    fn parse_raw(tag: &str) -> Result<LanguageTag, LanguageTagError> {
-        let mut parts = tag.split("-");
-        let mut target: [u8; 10] = [PAD; 10];
+fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
+    let mut parts = tag.split("-");
+    let mut val: u64 = 0;
 
-        // Consume the first part, which we know must be a language
-        match parts.nth(0) {
-            // The value "mis" represents a language tag we can't represent,
-            // perhaps because the whole thing is private use, like
-            // "x-enochian".
-            //
-            // TODO: map private-use tags onto the [qaa-qtz] range instead.
-            Some("i") | Some("x") => {
-                write_into_fixed(&mut target, "mis", 0, 3);
-            }
-            Some(language_ref) => {
-                if !check_characters(language_ref) {
-                    return Err(LanguageTagError::InvalidCharacter);
-                }
-                write_into_fixed(&mut target, language_ref, 0, 3)
-            }
-            None => {
-                return Err(LanguageTagError::ParseError);
-            }
-        };
-        let mut state: ParserState = ParserState::AfterLanguage(0);
-        for subtag_ref in parts {
-            let language_state: i32 = {
-                match state {
-                    ParserState::AfterLanguage(num) => num,
-                    _ => -1,
-                }
-            };
-            if !check_characters(subtag_ref) {
+    match parts.nth(0) {
+        Some("i") | Some("x") => {
+            return Ok(MISSING_CODE);
+        }
+        Some(language_ref) => {
+            if !check_characters(language_ref) {
                 return Err(LanguageTagError::InvalidCharacter);
             }
-            if is_extension(subtag_ref) {
-                break;
-            } else if state != ParserState::AfterVariant && is_variant(subtag_ref) {
-                state = ParserState::AfterVariant;
-            } else if (language_state >= 0 || state == ParserState::AfterScript) &&
-                      is_region(subtag_ref) {
-                let region_val = subtag_ref.to_uppercase();
-                write_into_fixed(&mut target, &region_val, 7, 3);
-                state = ParserState::AfterRegion;
-            } else if language_state >= 0 && is_script(subtag_ref) {
-                let (first_letter, rest_letters) = subtag_ref.split_at(1);
-                let first_letter_string: String = first_letter.to_uppercase();
-                let rest_letters_string: String = rest_letters.to_lowercase();
-                let script_val = first_letter_string + &rest_letters_string;
-                write_into_fixed(&mut target, &script_val, 3, 4);
-                state = ParserState::AfterScript;
-            } else if language_state >= 0 && language_state < 3 && is_extlang(subtag_ref) {
-                // This is an extlang; discard it and just count the fact that
-                // it was parsed.
-                state = ParserState::AfterLanguage(language_state + 1);
-            } else {
-                return Err(LanguageTagError::SubtagFormatError);
-            }
+            val |= encode_subtag(language_ref, 3) << LANGUAGE_SHIFT;
         }
-        Ok(LanguageTag { data: target })
+        None => {
+            return Err(LanguageTagError::ParseError);
+        }
     }
+    let mut state: ParserState = ParserState::AfterLanguage(0);
+    for subtag_ref in parts {
+        let language_state: i32 = {
+            match state {
+                ParserState::AfterLanguage(num) => num,
+                _ => -1,
+            }
+        };
+        if !check_characters(subtag_ref) {
+            return Err(LanguageTagError::InvalidCharacter);
+        }
+        if is_extension(subtag_ref) {
+            break;
+        } else if state != ParserState::AfterVariant && is_variant(subtag_ref) {
+            state = ParserState::AfterVariant;
+        } else if (language_state >= 0 || state == ParserState::AfterScript) &&
+                  is_region(subtag_ref) {
+            val |= encode_subtag(subtag_ref, 3);
+            state = ParserState::AfterRegion;
+        } else if language_state >= 0 && is_script(subtag_ref) {
+            val |= encode_subtag(subtag_ref, 4) << SCRIPT_SHIFT;
+            state = ParserState::AfterScript;
+        } else if language_state >= 0 && language_state < 3 && is_extlang(subtag_ref) {
+            // This is an extlang; discard it and just count the fact that
+            // it was parsed.
+            state = ParserState::AfterLanguage(language_state + 1);
+        } else {
+            return Err(LanguageTagError::SubtagFormatError);
+        }
+    }
+    Ok(val)
+}
 
-    pub fn parse(tag: &str) -> Result<LanguageTag, LanguageTagError> {
-        let normal_tag: String = tag.replace("_", "-").to_lowercase();
-        Ok(LanguageTag::parse_raw(&normal_tag)?)
-    }
+pub fn parse_raw_tag(tag: &str) -> Result<u64, LanguageTagError> {
+    let normal_tag: String = tag.replace("_", "-").to_lowercase();
+    Ok(parse_lowercase_tag(&normal_tag)?)
+}
 
-    pub fn internal_bytes(&self) -> [u8; 10] {
-        self.data
+pub fn decode_tag(val: u64) -> Result<String, LanguageTagError> {
+    let mut parts: Vec<String> = Vec::with_capacity(3);
+    match decode_subtag((val & LANGUAGE_MASK) >> LANGUAGE_SHIFT) {
+        Some(lang) => {
+            parts.push(lang);
+        }
+        None => {
+            parts.push("und".to_string());
+        }
     }
-
-    pub fn as_literal(&self) -> String {
-        let s = from_utf8(&self.data).unwrap();
-        format!("*b\"{}\"", s)
+    match decode_subtag((val & SCRIPT_MASK) >> SCRIPT_SHIFT) {
+        Some(script) => {
+            let (first_letter, rest_letters) = script.split_at(1);
+            let first_letter_string: String = first_letter.to_uppercase();
+            let rest_letters_string: String = rest_letters.to_lowercase();
+            let script_cap = first_letter_string + &rest_letters_string;
+            parts.push(script_cap);
+        }
+        None => {}
     }
+    match decode_subtag(val & REGION_MASK) {
+        Some(region) => {
+            parts.push(region.to_uppercase());
+        }
+        None => {}
+    }
+    Ok(parts.join("-"))
 }
 
 fn check_characters(subtag: &str) -> bool {
@@ -153,26 +201,30 @@ fn is_extlang(subtag: &str) -> bool {
     }
 }
 
-fn write_into_fixed(arr: &mut [u8; 10], s: &str, offset: usize, length: usize) {
-    for (i, b) in s.bytes().enumerate() {
-        if i >= length {
-            break;
-        }
-        arr[offset + i] = b;
-    }
-}
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_parse() {
-        let tag = LanguageTag::parse("zh-hant-tw").unwrap();
-        assert_eq!(tag.as_literal(), "*b\"zh HantTW \"");
+    fn test_subtag() {
+        assert_eq!(encode_subtag("999", 3), 999);
+        assert_eq!(encode_subtag("aa", 3), 2056);
+    }
 
-        let tag = LanguageTag::parse("en").unwrap();
-        assert_eq!(tag.as_literal(), "*b\"en        \"");
+    fn round_trip(tag: &str) {
+        let val = parse_raw_tag(tag).unwrap();
+        let decoded = decode_tag(val).unwrap();
+        assert_eq!(tag, &decoded)
+    }
+
+    #[test]
+    fn test_parse() {
+        round_trip("zh-Hant-TW");
+        round_trip("en");
+        round_trip("und");
+        round_trip("pt-BR");
+        round_trip("und-Vaii");
+        round_trip("es-419");
     }
 }
