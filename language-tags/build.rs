@@ -5,7 +5,7 @@ extern crate json;
 use std::env;
 use std::path::Path;
 use std::io::prelude::*;
-use std::io::{BufWriter, Error};
+use std::io::{BufWriter, BufReader, Error};
 use std::fs::File;
 use language_tag_parser::parse_tag;
 
@@ -86,6 +86,25 @@ fn make_tables() -> Result<(), Error> {
     }
     builder.build(&mut out_file).unwrap();
     write!(&mut out_file, ";\n")?;
+
+    // Now write a convenient file of constants for commonly-used languages.
+    let const_path = Path::new(&env::var("OUT_DIR").unwrap()).join("languages.rs");
+    let mut const_file = BufWriter::new(File::create(&const_path)?);
+    let in_file = try!(File::open("data/languages.txt"));
+    let in_buf = BufReader::new(&in_file);
+    for line_w in in_buf.lines() {
+        let line = line_w?;
+        let parts: Vec<&str> = line.split("\t").collect();
+        if parts.len() < 2 {
+            println!("{}", line);
+        }
+        let from_name = parts[0];
+        let to_code = parse_tag(parts[1]).unwrap();
+        write!(&mut const_file,
+               "pub const {}: u64 = 0x{:x}_u64;\n",
+               from_name,
+               to_code)?;
+    }
 
     Ok(())
 }
