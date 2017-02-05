@@ -7,7 +7,7 @@ use std::path::Path;
 use std::io::prelude::*;
 use std::io::{BufWriter, Error};
 use std::fs::File;
-use language_tag_parser::LanguageTag;
+use language_tag_parser::parse_tag;
 
 fn read_json(filename: &str) -> Result<json::JsonValue, Error> {
     let mut f = File::open(filename)?;
@@ -24,17 +24,28 @@ fn make_tables() -> Result<(), Error> {
     let ref language_aliases = parsed["supplemental"]["metadata"]["alias"]["languageAlias"];
     let mut builder = phf_codegen::Map::new();
 
-    // Handle language tag replacements, which are used both as replacements
-    // for the language subtag and for the entire tag. If they replace the
-    // language subtag, they may need to be re-parsed. Make them lowercase,
-    // so that they're already normalized for the parser.
+    // Handle replacements of entire language tags, based on string matching
     write!(&mut out_file,
-           "pub static LANG_REPLACE: ::phf::Map<&'static str, &'static str> = ")?;
+           "pub static TAG_REPLACE: ::phf::Map<&'static str, u64> = ")?;
     for pair in language_aliases.entries() {
         let (key, val) = pair;
-        let replacement = val["_replacement"].to_string().to_lowercase();
-        let val_literal = format!("\"{}\"", replacement);
-        builder.entry(key.to_lowercase(), &val_literal);
+        let replacement = parse_tag(&val["_replacement"].to_string()).unwrap();
+        builder.entry(key, &replacement.to_string());
+    }
+    builder.build(&mut out_file).unwrap();
+    write!(&mut out_file, ";\n")?;
+
+    // Handle replacements for the language tag in particular.
+    let mut builder = phf_codegen::Map::new();
+    write!(&mut out_file,
+           "pub static LANG_REPLACE: ::phf::Map<u64, u64> = ")?;
+    for pair in language_aliases.entries() {
+        let (key, val) = pair;
+        if !key.contains("-") {
+            let replaced = parse_tag(key).unwrap();
+            let replacement = parse_tag(&val["_replacement"].to_string()).unwrap();
+            builder.entry(replaced, &replacement.to_string());
+        }
     }
     builder.build(&mut out_file).unwrap();
     write!(&mut out_file, ";\n")?;
@@ -44,17 +55,18 @@ fn make_tables() -> Result<(), Error> {
     let ref region_aliases = parsed["supplemental"]["metadata"]["alias"]["territoryAlias"];
     let mut builder = phf_codegen::Map::new();
     write!(&mut out_file,
-           "pub static REGION_REPLACE: ::phf::Map<&'static str, &'static str> = ")?;
+           "pub static REGION_REPLACE: ::phf::Map<&'static str, u64> = ")?;
     for pair in region_aliases.entries() {
         let (key, val) = pair;
-        let replacement = val["_replacement"].to_string();
+        let replace_val = val["_replacement"].to_string();
         // Skip replacements with spaces; these indicate multiple
-        // possibilities, such as replacing the Soviet Union with its
+        // possibilities, such as replacing Yugoslavia with its
         // successors. It is extremely unclear how to handle this case.
-        if !replacement.contains(" ") {
+        if !replace_val.contains(" ") {
             if key.len() == 2 || key.chars().nth(0).unwrap().is_digit(10) {
-                let val_literal = format!("\"{}\"", replacement);
-                builder.entry(key.to_uppercase(), &val_literal);
+                let replaced = parse_tag(&format!("und-{}", key)).unwrap();
+                let replacement = parse_tag(&format!("und-{}", replace_val)).unwrap();
+                builder.entry(replaced, &replacement.to_string());
             }
         }
     }
@@ -65,13 +77,12 @@ fn make_tables() -> Result<(), Error> {
     let ref likely_subtags = parsed["supplemental"]["likelySubtags"];
     let mut builder = phf_codegen::Map::new();
     write!(&mut out_file,
-           "pub static LIKELY_SUBTAGS: ::phf::Map<[u8; 10], [u8; 10]> = ")?;
+           "pub static LIKELY_SUBTAGS: ::phf::Map<u64, u64> = ")?;
     for pair in likely_subtags.entries() {
         let (key, val) = pair;
-        let from_tag = LanguageTag::parse(key).unwrap().internal_bytes();
-        let to_val: &str = &val.to_string();
-        let to_tag = LanguageTag::parse(&to_val).unwrap().as_literal();
-        builder.entry(from_tag, &to_tag);
+        let from_tag = parse_tag(key).unwrap();
+        let to_tag = parse_tag(&val.to_string()).unwrap();
+        builder.entry(from_tag, &to_tag.to_string());
     }
     builder.build(&mut out_file).unwrap();
     write!(&mut out_file, ";\n")?;

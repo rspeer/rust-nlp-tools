@@ -1,11 +1,14 @@
-pub const LANGUAGE_MASK: u64 = 0x00ff_ff00_0000_0000_u64;
-pub const SCRIPT_MASK: u64 = 0x0000_00ff_ffff_0000_u64;
-pub const REGION_MASK: u64 = 0x0000_0000_0000_ffff_u64;
-pub const LANGUAGE_SHIFT: u64 = 40u64;
-pub const SCRIPT_SHIFT: u64 = 16u64;
-
+pub const LANGUAGE_MASK: u64 = 0x7fff_0000_0000_0000_u64;
+pub const PROTO_MASK: u64 = 0x0000_8000_0000_0000_u64;
+pub const EXTLANG_MASK: u64 = 0x0000_7fff_0000_0000_u64;
+pub const LANGUAGE_EXT_MASK: u64 = 0x7fff_ffff_0000_0000_u64;
+pub const SCRIPT_MASK: u64 = 0x0000_0000_7fff_f800_u64;
+pub const REGION_MASK: u64 = 0x0000_0000_0000_07ff_u64;
+pub const SCRIPT_SHIFT: u64 = 11u64;
+pub const EXTLANG_SHIFT: u64 = 32u64;
+pub const LANGUAGE_SHIFT: u64 = 48u64;
 pub const EMPTY_CODE: u64 = 0u64;
-pub const MISSING_CODE: u64 = 14974248858681344u64;
+pub const MISSING_CODE: u64 = 1916703853911212032u64;
 
 /// There are three ranges of values a subtag could be
 /// encoded as:
@@ -59,14 +62,14 @@ fn encode_subtag(subtag: &str, length: usize) -> u64 {
 #[derive(PartialEq, Debug)]
 pub enum LanguageTagError {
     // The tag contained a character outside of [-0-9A-Za-z_]
-    InvalidCharacter,
+    InvalidCharacter(String),
 
     // The subtag we're parsing has an unexpected shape, or came in the
     // wrong order
-    SubtagFormatError,
+    SubtagFormatError(String),
 
     // We can't even parse a subtag from here
-    ParseError,
+    ParseError(String),
 }
 
 #[derive(PartialEq)]
@@ -86,14 +89,15 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
         Some("i") | Some("x") => {
             return Ok(MISSING_CODE);
         }
+        Some("und") => {}
         Some(language_ref) => {
             if !check_characters(language_ref) {
-                return Err(LanguageTagError::InvalidCharacter);
+                return Err(LanguageTagError::InvalidCharacter(tag.to_string()));
             }
             val |= encode_subtag(language_ref, 3) << LANGUAGE_SHIFT;
         }
         None => {
-            return Err(LanguageTagError::ParseError);
+            return Err(LanguageTagError::ParseError(tag.to_string()));
         }
     }
     let mut state: ParserState = ParserState::AfterLanguage(0);
@@ -105,7 +109,7 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
             }
         };
         if !check_characters(subtag_ref) {
-            return Err(LanguageTagError::InvalidCharacter);
+            return Err(LanguageTagError::InvalidCharacter(tag.to_string()));
         }
         if is_extension(subtag_ref) {
             break;
@@ -113,7 +117,7 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
             state = ParserState::AfterVariant;
         } else if (language_state >= 0 || state == ParserState::AfterScript) &&
                   is_region(subtag_ref) {
-            val |= encode_subtag(subtag_ref, 3);
+            val |= encode_subtag(subtag_ref, 2);
             state = ParserState::AfterRegion;
         } else if language_state >= 0 && is_script(subtag_ref) {
             val |= encode_subtag(subtag_ref, 4) << SCRIPT_SHIFT;
@@ -121,21 +125,29 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
         } else if language_state >= 0 && language_state < 3 && is_extlang(subtag_ref) {
             // This is an extlang; discard it and just count the fact that
             // it was parsed.
+            if subtag_ref == "pro" {
+                // This is the most common legitimately-used extlang,
+                // indicating a protolanguage. We encode it in one bit.
+                val |= PROTO_MASK;
+            } else if val & EXTLANG_MASK == 0 {
+                // Keep the first non-proto extlang.
+                val |= encode_subtag(subtag_ref, 3) << EXTLANG_SHIFT;
+            }
             state = ParserState::AfterLanguage(language_state + 1);
         } else {
-            return Err(LanguageTagError::SubtagFormatError);
+            return Err(LanguageTagError::SubtagFormatError(tag.to_string()));
         }
     }
     Ok(val)
 }
 
-pub fn parse_raw_tag(tag: &str) -> Result<u64, LanguageTagError> {
+pub fn parse_tag(tag: &str) -> Result<u64, LanguageTagError> {
     let normal_tag: String = tag.replace("_", "-").to_lowercase();
     Ok(parse_lowercase_tag(&normal_tag)?)
 }
 
-pub fn decode_tag(val: u64) -> Result<String, LanguageTagError> {
-    let mut parts: Vec<String> = Vec::with_capacity(3);
+pub fn unparse_tag(val: u64) -> Result<String, LanguageTagError> {
+    let mut parts: Vec<String> = Vec::with_capacity(4);
     match decode_subtag((val & LANGUAGE_MASK) >> LANGUAGE_SHIFT) {
         Some(lang) => {
             parts.push(lang);
@@ -143,6 +155,15 @@ pub fn decode_tag(val: u64) -> Result<String, LanguageTagError> {
         None => {
             parts.push("und".to_string());
         }
+    }
+    match decode_subtag((val & EXTLANG_MASK) >> EXTLANG_SHIFT) {
+        Some(lang) => {
+            parts.push(lang);
+        }
+        None => {}
+    }
+    if val & PROTO_MASK != 0 {
+        parts.push("pro".to_string());
     }
     match decode_subtag((val & SCRIPT_MASK) >> SCRIPT_SHIFT) {
         Some(script) => {
@@ -161,6 +182,30 @@ pub fn decode_tag(val: u64) -> Result<String, LanguageTagError> {
         None => {}
     }
     Ok(parts.join("-"))
+}
+
+pub fn update_tag(old_tag: u64, new_tag: u64) -> u64 {
+    let mut update_mask: u64 = 0;
+    if new_tag & LANGUAGE_EXT_MASK != 0 {
+        update_mask |= LANGUAGE_EXT_MASK;
+    }
+    if new_tag & SCRIPT_MASK != 0 {
+        update_mask |= SCRIPT_MASK;
+    }
+    if new_tag & REGION_MASK != 0 {
+        update_mask |= REGION_MASK;
+    }
+    (old_tag & !update_mask) | (new_tag & update_mask)
+}
+
+pub fn broader_tags(tag: u64) -> Vec<u64> {
+    let possibilities = vec![tag & (LANGUAGE_MASK | SCRIPT_MASK | REGION_MASK),
+                             tag & (LANGUAGE_MASK | REGION_MASK),
+                             tag & (LANGUAGE_MASK | SCRIPT_MASK),
+                             tag & LANGUAGE_MASK,
+                             tag & REGION_MASK,
+                             tag & SCRIPT_MASK];
+    possibilities.into_iter().filter(|&n| n != tag).collect()
 }
 
 fn check_characters(subtag: &str) -> bool {
@@ -213,8 +258,8 @@ mod tests {
     }
 
     fn round_trip(tag: &str) {
-        let val = parse_raw_tag(tag).unwrap();
-        let decoded = decode_tag(val).unwrap();
+        let val = parse_tag(tag).unwrap();
+        let decoded = unparse_tag(val).unwrap();
         assert_eq!(tag, &decoded)
     }
 
@@ -226,5 +271,7 @@ mod tests {
         round_trip("pt-BR");
         round_trip("und-Vaii");
         round_trip("es-419");
+        round_trip("ine-pro");
+        round_trip("roa-opt-pro");
     }
 }
