@@ -17,17 +17,17 @@ pub struct LanguageCode {
 }
 
 impl LanguageCode {
-    /// Get the 2- or 3-character language code as a String, giving "und" if
+    /// Get the 2- or 3-character language subtag as a String, giving "und" if
     /// the language is unknown.
-    pub fn language_code(&self) -> String {
+    pub fn language_subtag(&self) -> String {
         decode_language(self.data)
     }
 
     /// Get the 2- or 3-character language code as an Option<String>, giving
     /// None if the language is unknown.
     pub fn get_language(&self) -> Option<String> {
-        let code = self.language_code();
-        if code == "und" { None } else { Some(code) }
+        let subtag = self.language_subtag();
+        if subtag == "und" { None } else { Some(subtag) }
     }
 
     pub fn get_extlang(&self) -> Option<String> {
@@ -108,16 +108,16 @@ mod tests {
 
     #[test]
     fn test_parse() {
-        let tag: LanguageCode = "zh-hant-tw".parse().unwrap();
-        assert_eq!(tag.language_code(), "zh");
-        assert_eq!(tag.get_script(), Some("Hant".to_string()));
-        assert_eq!(tag.get_region(), Some("TW".to_string()));
-        assert_eq!(tag.to_string(), "zh-Hant-TW".to_string());
+        let code: LanguageCode = "zh-hant-tw".parse().unwrap();
+        assert_eq!(code.get_language(), Some("zh".to_string()));
+        assert_eq!(code.get_script(), Some("Hant".to_string()));
+        assert_eq!(code.get_region(), Some("TW".to_string()));
+        assert_eq!(code.to_string(), "zh-Hant-TW".to_string());
     }
 
     fn parses_as(input: &str, result: &str) {
-        let tag: LanguageCode = input.parse().unwrap();
-        assert_eq!(tag.to_string(), result.to_string());
+        let code: LanguageCode = input.parse().unwrap();
+        assert_eq!(code.to_string(), result.to_string());
     }
 
     #[test]
@@ -134,21 +134,21 @@ mod tests {
         parses_as("en-840", "en-US");
         parses_as("de-DD", "de-DE");
         parses_as("sh-QU", "sr-Latn-EU");
-        parses_as("und-Qaai", "und-Zinh");
+        parses_as("sh-Qaai", "sr-Zinh");
     }
 
     #[test]
     fn test_named() {
-        let ref tag: LanguageCode = languages::UNKNOWN;
-        assert_eq!(tag.language_code(), "und");
+        let ref lcode: LanguageCode = languages::UNKNOWN;
+        assert_eq!(lcode.language_subtag(), "und");
 
-        let tag: LanguageCode = "und".parse().unwrap();
-        assert_eq!(tag, languages::UNKNOWN);
+        let lcode: LanguageCode = "und".parse().unwrap();
+        assert_eq!(lcode, languages::UNKNOWN);
 
-        let tag: LanguageCode = "zh-hans".parse().unwrap();
-        assert_eq!(tag, languages::SIMPLIFIED_CHINESE);
+        let lcode: LanguageCode = "zh-hans".parse().unwrap();
+        assert_eq!(lcode, languages::SIMPLIFIED_CHINESE);
 
-        let tag: LanguageCode = "zh-hant-hk".parse().unwrap();
-        assert_eq!(tag, languages::HONG_KONG_CHINESE);
+        let lcode: LanguageCode = "zh-hant-hk".parse().unwrap();
+        assert_eq!(lcode, languages::HONG_KONG_CHINESE);
     }
 }
