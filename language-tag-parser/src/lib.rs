@@ -7,7 +7,10 @@ pub const REGION_MASK: u64 = 0x0000_0000_0000_07ff_u64;
 pub const SCRIPT_SHIFT: u64 = 11u64;
 pub const EXTLANG_SHIFT: u64 = 32u64;
 pub const LANGUAGE_SHIFT: u64 = 48u64;
+
 pub const EMPTY_CODE: u64 = 0u64;
+pub const INHERIT_SCRIPT_OLD: u64 = 0x0000000044408800_u64;
+pub const INHERIT_SCRIPT: u64 = 0x00000000694d8000_u64;
 pub const MISSING_CODE: u64 = 1916703853911212032u64;
 
 /// There are three ranges of values a subtag could be
@@ -141,7 +144,7 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageCodeError> {
     Ok(val)
 }
 
-pub fn parse_tag(tag: &str) -> Result<u64, LanguageCodeError> {
+pub fn encode_tag(tag: &str) -> Result<u64, LanguageCodeError> {
     let normal_tag: String = tag.replace("_", "-").to_lowercase();
     Ok(parse_lowercase_tag(&normal_tag)?)
 }
@@ -185,7 +188,7 @@ pub fn decode_region(val: u64) -> Option<String> {
     }
 }
 
-pub fn unparse_tag(val: u64) -> String {
+pub fn decode_tag(val: u64) -> String {
     let mut parts: Vec<String> = Vec::with_capacity(4);
     parts.push(decode_language(val));
     match decode_extlang(val) {
@@ -277,8 +280,8 @@ mod tests {
     }
 
     fn round_trip(tag: &str) {
-        let val = parse_tag(tag).unwrap();
-        let decoded = unparse_tag(val);
+        let val = encode_tag(tag).unwrap();
+        let decoded = decode_tag(val);
         assert_eq!(tag, &decoded)
     }
 

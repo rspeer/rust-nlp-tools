@@ -3,9 +3,10 @@ extern crate phf;
 extern crate language_tag_parser;
 
 use std::str::FromStr;
-pub use language_tag_parser::{LanguageCodeError, parse_tag, unparse_tag, decode_language,
+pub use language_tag_parser::{LanguageCodeError, encode_tag, decode_tag, decode_language,
                               decode_extlang, decode_script, decode_region, update_tag,
-                              LANGUAGE_MASK, LANGUAGE_EXT_MASK, SCRIPT_MASK, REGION_MASK};
+                              LANGUAGE_MASK, LANGUAGE_EXT_MASK, SCRIPT_MASK, REGION_MASK,
+                              INHERIT_SCRIPT, INHERIT_SCRIPT_OLD};
 pub mod langdata;
 pub mod languages;
 
@@ -49,7 +50,7 @@ impl LanguageCode {
     }
 
     pub fn to_string(&self) -> String {
-        unparse_tag(self.data)
+        decode_tag(self.data)
     }
 
     pub fn parse(tag: &str) -> Result<LanguageCode, LanguageCodeError> {
@@ -57,7 +58,7 @@ impl LanguageCode {
         match langdata::TAG_REPLACE.get(&normal_tag as &str) {
             Some(&repl) => Ok(LanguageCode { data: repl }),
             None => {
-                let mut val: u64 = parse_tag(tag)?;
+                let mut val: u64 = encode_tag(tag)?;
                 let lang_val: u64 = val & LANGUAGE_MASK;
                 match langdata::LANG_REPLACE.get(&lang_val) {
                     Some(&newlang) => {
@@ -74,8 +75,8 @@ impl LanguageCode {
                 // The only script replacement is Qaai -> Zinh.
                 // (I don't even know when you would use this.)
                 let script_val: u64 = val & SCRIPT_MASK;
-                if script_val == languages::INHERIT_SCRIPT_OLD.data {
-                    val = update_tag(val, languages::INHERIT_SCRIPT.data);
+                if script_val == INHERIT_SCRIPT_OLD {
+                    val = update_tag(val, INHERIT_SCRIPT);
                 }
 
                 let region_val: u64 = val & REGION_MASK;

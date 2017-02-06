@@ -7,7 +7,8 @@ use std::path::Path;
 use std::io::prelude::*;
 use std::io::{BufWriter, BufReader, Error};
 use std::fs::File;
-use language_tag_parser::parse_tag;
+use language_tag_parser::encode_tag;
+
 
 fn read_json(filename: &str) -> Result<json::JsonValue, Error> {
     let mut f = File::open(filename)?;
@@ -29,7 +30,7 @@ fn make_tables() -> Result<(), Error> {
            "pub static TAG_REPLACE: ::phf::Map<&'static str, u64> = ")?;
     for pair in language_aliases.entries() {
         let (key, val) = pair;
-        let replacement = parse_tag(&val["_replacement"].to_string()).unwrap();
+        let replacement = encode_tag(&val["_replacement"].to_string()).unwrap();
         // let key_lower: &'static str = &key.to_lowercase();
         builder.entry(key.to_lowercase(), &replacement.to_string());
     }
@@ -43,8 +44,8 @@ fn make_tables() -> Result<(), Error> {
     for pair in language_aliases.entries() {
         let (key, val) = pair;
         if !key.contains("-") {
-            let replaced = parse_tag(key).unwrap();
-            let replacement = parse_tag(&val["_replacement"].to_string()).unwrap();
+            let replaced = encode_tag(key).unwrap();
+            let replacement = encode_tag(&val["_replacement"].to_string()).unwrap();
             builder.entry(replaced, &replacement.to_string());
         }
     }
@@ -65,8 +66,8 @@ fn make_tables() -> Result<(), Error> {
         // successors. It is extremely unclear how to handle this case.
         if !replace_val.contains(" ") {
             if key.len() == 2 || key.chars().nth(0).unwrap().is_digit(10) {
-                let replaced = parse_tag(&format!("und-{}", key)).unwrap();
-                let replacement = parse_tag(&format!("und-{}", replace_val)).unwrap();
+                let replaced = encode_tag(&format!("und-{}", key)).unwrap();
+                let replacement = encode_tag(&format!("und-{}", replace_val)).unwrap();
                 builder.entry(replaced, &replacement.to_string());
             }
         }
@@ -81,8 +82,8 @@ fn make_tables() -> Result<(), Error> {
            "pub static LIKELY_SUBTAGS: ::phf::Map<u64, u64> = ")?;
     for pair in likely_subtags.entries() {
         let (key, val) = pair;
-        let from_tag = parse_tag(key).unwrap();
-        let to_tag = parse_tag(&val.to_string()).unwrap();
+        let from_tag = encode_tag(key).unwrap();
+        let to_tag = encode_tag(&val.to_string()).unwrap();
         builder.entry(from_tag, &to_tag.to_string());
     }
     builder.build(&mut out_file).unwrap();
@@ -100,9 +101,9 @@ fn make_tables() -> Result<(), Error> {
             println!("{}", line);
         }
         let from_name = parts[0];
-        let to_code = parse_tag(parts[1]).unwrap();
+        let to_code = encode_tag(parts[1]).unwrap();
         write!(&mut const_file,
-               "pub const {}: LanguageCode = LanguageCode {{ data: 0x{:x}_u64 }};\n",
+               "pub const {:<24}: LanguageCode = LanguageCode {{ data: 0x{:>016x}_u64 }};\n",
                from_name,
                to_code)?;
     }
