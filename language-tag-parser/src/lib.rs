@@ -120,10 +120,16 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageCodeError> {
             state = ParserState::AfterVariant;
         } else if (language_state >= 0 || state == ParserState::AfterScript) &&
                   is_region(subtag_ref) {
-            val |= encode_subtag(subtag_ref, 2);
+            // Discard a region of "zz", similarly to a language of "und".
+            if subtag_ref != "zz" {
+                val |= encode_subtag(subtag_ref, 2);
+            }
             state = ParserState::AfterRegion;
         } else if language_state >= 0 && is_script(subtag_ref) {
-            val |= encode_subtag(subtag_ref, 4) << SCRIPT_SHIFT;
+            // Discard a script of "zzzz", similarly to a language of "und".
+            if subtag_ref != "zzzz" {
+                val |= encode_subtag(subtag_ref, 4) << SCRIPT_SHIFT;
+            }
             state = ParserState::AfterScript;
         } else if language_state >= 0 && language_state < 3 && is_extlang(subtag_ref) {
             // This is an extlang; discard it and just count the fact that
@@ -218,16 +224,6 @@ pub fn update_tag(old_tag: u64, new_tag: u64) -> u64 {
         update_mask |= REGION_MASK;
     }
     (old_tag & !update_mask) | (new_tag & update_mask)
-}
-
-pub fn broader_tags(tag: u64) -> Vec<u64> {
-    let possibilities = vec![tag & (LANGUAGE_MASK | SCRIPT_MASK | REGION_MASK),
-                             tag & (LANGUAGE_MASK | REGION_MASK),
-                             tag & (LANGUAGE_MASK | SCRIPT_MASK),
-                             tag & LANGUAGE_MASK,
-                             tag & REGION_MASK,
-                             tag & SCRIPT_MASK];
-    possibilities.into_iter().filter(|&n| n != tag).collect()
 }
 
 fn check_characters(subtag: &str) -> bool {
