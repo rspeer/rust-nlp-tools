@@ -30,7 +30,8 @@ fn make_tables() -> Result<(), Error> {
     for pair in language_aliases.entries() {
         let (key, val) = pair;
         let replacement = parse_tag(&val["_replacement"].to_string()).unwrap();
-        builder.entry(key, &replacement.to_string());
+        // let key_lower: &'static str = &key.to_lowercase();
+        builder.entry(key.to_lowercase(), &replacement.to_string());
     }
     builder.build(&mut out_file).unwrap();
     write!(&mut out_file, ";\n")?;
@@ -55,7 +56,7 @@ fn make_tables() -> Result<(), Error> {
     let ref region_aliases = parsed["supplemental"]["metadata"]["alias"]["territoryAlias"];
     let mut builder = phf_codegen::Map::new();
     write!(&mut out_file,
-           "pub static REGION_REPLACE: ::phf::Map<&'static str, u64> = ")?;
+           "pub static REGION_REPLACE: ::phf::Map<u64, u64> = ")?;
     for pair in region_aliases.entries() {
         let (key, val) = pair;
         let replace_val = val["_replacement"].to_string();
@@ -101,7 +102,7 @@ fn make_tables() -> Result<(), Error> {
         let from_name = parts[0];
         let to_code = parse_tag(parts[1]).unwrap();
         write!(&mut const_file,
-               "pub const {}: u64 = 0x{:x}_u64;\n",
+               "pub const {}: LanguageCode = LanguageCode {{ data: 0x{:x}_u64 }};\n",
                from_name,
                to_code)?;
     }

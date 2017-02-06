@@ -8,10 +8,9 @@ build = "build.rs"
 [build-dependencies]
 phf_codegen = "*"
 json = "*"
+language-tag-parser = { path = "../language-tag-parser" }
 
 [dependencies]
 lazy_static = "*"
 phf = "*"
-
-[build-dependencies.language-tag-parser]
-path = "../language-tag-parser"
+language-tag-parser = { path = "../language-tag-parser" }

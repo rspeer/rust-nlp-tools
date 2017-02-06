@@ -60,7 +60,7 @@ fn encode_subtag(subtag: &str, length: usize) -> u64 {
 
 
 #[derive(PartialEq, Debug)]
-pub enum LanguageTagError {
+pub enum LanguageCodeError {
     // The tag contained a character outside of [-0-9A-Za-z_]
     InvalidCharacter(String),
 
@@ -81,7 +81,7 @@ enum ParserState {
 }
 
 
-fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
+fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageCodeError> {
     let mut parts = tag.split("-");
     let mut val: u64 = 0;
 
@@ -92,12 +92,12 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
         Some("und") => {}
         Some(language_ref) => {
             if !check_characters(language_ref) {
-                return Err(LanguageTagError::InvalidCharacter(tag.to_string()));
+                return Err(LanguageCodeError::InvalidCharacter(tag.to_string()));
             }
             val |= encode_subtag(language_ref, 3) << LANGUAGE_SHIFT;
         }
         None => {
-            return Err(LanguageTagError::ParseError(tag.to_string()));
+            return Err(LanguageCodeError::ParseError(tag.to_string()));
         }
     }
     let mut state: ParserState = ParserState::AfterLanguage(0);
@@ -109,7 +109,7 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
             }
         };
         if !check_characters(subtag_ref) {
-            return Err(LanguageTagError::InvalidCharacter(tag.to_string()));
+            return Err(LanguageCodeError::InvalidCharacter(tag.to_string()));
         }
         if is_extension(subtag_ref) {
             break;
@@ -135,53 +135,72 @@ fn parse_lowercase_tag(tag: &str) -> Result<u64, LanguageTagError> {
             }
             state = ParserState::AfterLanguage(language_state + 1);
         } else {
-            return Err(LanguageTagError::SubtagFormatError(tag.to_string()));
+            return Err(LanguageCodeError::SubtagFormatError(tag.to_string()));
         }
     }
     Ok(val)
 }
 
-pub fn parse_tag(tag: &str) -> Result<u64, LanguageTagError> {
+pub fn parse_tag(tag: &str) -> Result<u64, LanguageCodeError> {
     let normal_tag: String = tag.replace("_", "-").to_lowercase();
     Ok(parse_lowercase_tag(&normal_tag)?)
 }
 
-pub fn unparse_tag(val: u64) -> Result<String, LanguageTagError> {
-    let mut parts: Vec<String> = Vec::with_capacity(4);
+pub fn decode_language(val: u64) -> String {
     match decode_subtag((val & LANGUAGE_MASK) >> LANGUAGE_SHIFT) {
-        Some(lang) => {
-            parts.push(lang);
-        }
-        None => {
-            parts.push("und".to_string());
-        }
+        Some(lang) => lang,
+        None => "und".to_string(),
     }
+}
+
+pub fn decode_extlang(val: u64) -> Option<String> {
+    let proto: bool = val & PROTO_MASK != 0;
     match decode_subtag((val & EXTLANG_MASK) >> EXTLANG_SHIFT) {
         Some(lang) => {
-            parts.push(lang);
+            if proto {
+                Some(format!("{}-pro", lang))
+            } else {
+                Some(lang)
+            }
         }
-        None => {}
+        None => if proto { Some("pro".to_string()) } else { None },
     }
-    if val & PROTO_MASK != 0 {
-        parts.push("pro".to_string());
-    }
+}
+
+pub fn decode_script(val: u64) -> Option<String> {
     match decode_subtag((val & SCRIPT_MASK) >> SCRIPT_SHIFT) {
         Some(script) => {
             let (first_letter, rest_letters) = script.split_at(1);
-            let first_letter_string: String = first_letter.to_uppercase();
-            let rest_letters_string: String = rest_letters.to_lowercase();
-            let script_cap = first_letter_string + &rest_letters_string;
-            parts.push(script_cap);
+            let cap_script: String = first_letter.to_uppercase() + &rest_letters;
+            Some(cap_script)
         }
-        None => {}
+        None => None,
     }
+}
+
+pub fn decode_region(val: u64) -> Option<String> {
     match decode_subtag(val & REGION_MASK) {
-        Some(region) => {
-            parts.push(region.to_uppercase());
-        }
+        Some(region) => Some(region.to_uppercase()),
+        None => None,
+    }
+}
+
+pub fn unparse_tag(val: u64) -> String {
+    let mut parts: Vec<String> = Vec::with_capacity(4);
+    parts.push(decode_language(val));
+    match decode_extlang(val) {
+        Some(extlang) => parts.push(extlang),
         None => {}
     }
-    Ok(parts.join("-"))
+    match decode_script(val) {
+        Some(script) => parts.push(script),
+        None => {}
+    }
+    match decode_region(val) {
+        Some(region) => parts.push(region),
+        None => {}
+    }
+    parts.join("-")
 }
 
 pub fn update_tag(old_tag: u64, new_tag: u64) -> u64 {
@@ -259,7 +278,7 @@ mod tests {
 
     fn round_trip(tag: &str) {
         let val = parse_tag(tag).unwrap();
-        let decoded = unparse_tag(val).unwrap();
+        let decoded = unparse_tag(val);
         assert_eq!(tag, &decoded)
     }
 
