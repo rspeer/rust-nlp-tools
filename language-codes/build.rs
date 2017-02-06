@@ -7,8 +7,7 @@ use std::path::Path;
 use std::io::prelude::*;
 use std::io::{BufWriter, BufReader, Error};
 use std::fs::File;
-use language_tag_parser::encode_tag;
-
+use language_tag_parser::{encode_tag, language_pair_bytes};
 
 fn read_json(filename: &str) -> Result<json::JsonValue, Error> {
     let mut f = File::open(filename)?;
@@ -89,6 +88,29 @@ fn make_tables() -> Result<(), Error> {
     builder.build(&mut out_file).unwrap();
     write!(&mut out_file, ";\n")?;
 
+    // Read a file of language matches
+    let in_file = try!(File::open("data/matching.txt"));
+    let in_buf = BufReader::new(&in_file);
+    let mut builder = phf_codegen::Map::new();
+    write!(&mut out_file,
+           "pub static MATCH_DISTANCE: ::phf::Map<[u8; 16], i32> = ")?;
+    for line_w in in_buf.lines() {
+        let line = line_w?;
+        let parts: Vec<&str> = line.split(",").collect();
+        let lang1 = encode_tag(parts[0]).unwrap();
+        let lang2 = encode_tag(parts[1]).unwrap();
+        let distance: i32 = parts[2].parse().unwrap();
+        let sym: bool = parts[3] == "sym";
+        let pair1 = language_pair_bytes(lang1, lang2);
+        let pair2 = language_pair_bytes(lang2, lang1);
+        builder.entry(pair1, &distance.to_string());
+        if sym {
+            builder.entry(pair2, &distance.to_string());
+        }
+    }
+    builder.build(&mut out_file).unwrap();
+    write!(&mut out_file, ";\n")?;
+
     // Now write a convenient file of constants for commonly-used languages.
     let const_path = Path::new(&env::var("OUT_DIR").unwrap()).join("languages.rs");
     let mut const_file = BufWriter::new(File::create(&const_path)?);
@@ -97,9 +119,6 @@ fn make_tables() -> Result<(), Error> {
     for line_w in in_buf.lines() {
         let line = line_w?;
         let parts: Vec<&str> = line.split("\t").collect();
-        if parts.len() < 2 {
-            println!("{}", line);
-        }
         let from_name = parts[0];
         let to_code = encode_tag(parts[1]).unwrap();
         write!(&mut const_file,

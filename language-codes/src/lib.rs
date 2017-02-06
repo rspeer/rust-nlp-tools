@@ -3,18 +3,28 @@ extern crate phf;
 extern crate language_tag_parser;
 
 use std::str::FromStr;
+use std::fmt;
 pub use language_tag_parser::{LanguageCodeError, encode_tag, decode_tag, decode_language,
                               decode_extlang, decode_script, decode_region, update_tag,
-                              LANGUAGE_MASK, LANGUAGE_EXT_MASK, SCRIPT_MASK, REGION_MASK,
-                              INHERIT_SCRIPT, INHERIT_SCRIPT_OLD, EMPTY_CODE};
+                              language_pair_bytes, LANGUAGE_MASK, LANGUAGE_EXT_MASK, SCRIPT_MASK,
+                              REGION_MASK, INHERIT_SCRIPT, INHERIT_SCRIPT_OLD, EMPTY_CODE};
 pub mod langdata;
 pub mod languages;
+
+const SIMPLIFIED: u64 = languages::SIMPLIFIED_CHINESE.data & SCRIPT_MASK;
+const TRADITIONAL: u64 = languages::TRADITIONAL_CHINESE.data & SCRIPT_MASK;
 
 /// A LanguageCode is a wrapper around a 64-bit integer, so don't worry
 /// about copying them around. Think of this as a big enum.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct LanguageCode {
     data: u64,
+}
+
+impl fmt::Display for LanguageCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "lang(\"{}\")", self.to_string())
+    }
 }
 
 impl LanguageCode {
@@ -156,6 +166,120 @@ impl LanguageCode {
         }
         return self.clone();
     }
+
+    fn match_distance_language(&self, other: LanguageCode) -> i32 {
+        let lang1: u64 = self.data & LANGUAGE_MASK;
+        let lang2: u64 = other.data & LANGUAGE_MASK;
+        if lang1 == lang2 {
+            0
+        } else {
+            let pair = language_pair_bytes(lang1, lang2);
+            match langdata::MATCH_DISTANCE.get(&pair) {
+                Some(&dist) => dist,
+                None => 80,
+            }
+        }
+    }
+
+    fn match_distance_script(&self, other: LanguageCode) -> i32 {
+        let lang1: u64 = self.data & LANGUAGE_MASK;
+        let lang2: u64 = other.data & LANGUAGE_MASK;
+        let script1: u64 = self.data & SCRIPT_MASK;
+        let script2: u64 = other.data & SCRIPT_MASK;
+        if (lang1 | script1) == (lang2 | script2) {
+            0
+        } else if script1 == script2 {
+            self.match_distance_language(other)
+        } else {
+            let pair = language_pair_bytes(lang1 | script1, lang2 | script2);
+            match langdata::MATCH_DISTANCE.get(&pair) {
+                Some(&dist) => dist,
+                None => {
+                    if script1 == SIMPLIFIED && script2 == TRADITIONAL {
+                        15 + self.match_distance_language(other)
+                    } else if script1 == TRADITIONAL && script2 == SIMPLIFIED {
+                        19 + self.match_distance_language(other)
+                    } else {
+                        40 + self.match_distance_language(other)
+                    }
+                }
+            }
+        }
+    }
+
+    fn match_distance_region(&self, other: LanguageCode) -> i32 {
+        let bigmask: u64 = LANGUAGE_MASK | SCRIPT_MASK | REGION_MASK;
+        let reduced1 = self.data & bigmask;
+        let reduced2 = other.data & bigmask;
+        if reduced1 == reduced2 {
+            0
+        } else {
+            let pair = language_pair_bytes(reduced1, reduced2);
+            match langdata::MATCH_DISTANCE.get(&pair) {
+                Some(&dist) => dist,
+                None => {
+                    println!("{} -> {}", self, other);
+                    let lang1: u64 = self.data & LANGUAGE_MASK;
+                    let lang2: u64 = other.data & LANGUAGE_MASK;
+                    let region1: u64 = self.data & REGION_MASK;
+                    let region2: u64 = other.data & REGION_MASK;
+                    if region1 == region2 {
+                        self.match_distance_script(other)
+                    } else {
+                        let lang_region1 = lang1 | region1;
+                        let lang_region2 = lang2 | region2;
+                        if lang1 == languages::PORTUGUESE.data &&
+                           lang2 == languages::PORTUGUESE.data {
+                            // A specific match is defined between two codes for "New World"
+                            // Portuguese, pt-BR and pt-US. If only one of the codes is
+                            // "New World", the match is worse than two forms of European
+                            // Portuguese.
+                            if lang_region1 == languages::BRAZILIAN_PORTUGUESE.data ||
+                               lang_region2 == languages::BRAZILIAN_PORTUGUESE.data {
+                                8 + self.match_distance_script(other)
+                            } else if lang_region1 == languages::AMERICAN_PORTUGUESE.data ||
+                                      lang_region2 == languages::AMERICAN_PORTUGUESE.data {
+                                8 + self.match_distance_script(other)
+                            } else {
+                                4 + self.match_distance_script(other)
+                            }
+                        } else if lang1 == languages::ENGLISH.data &&
+                                  lang2 == languages::ENGLISH.data {
+                            if lang_region1 == languages::AMERICAN_ENGLISH.data ||
+                               lang_region2 == languages::AMERICAN_ENGLISH.data {
+                                6 + self.match_distance_script(other)
+                            } else if lang_region1 == languages::BRITISH_ENGLISH.data ||
+                                      lang_region2 == languages::BRITISH_ENGLISH.data {
+                                4 + self.match_distance_script(other)
+                            } else if lang_region1 == languages::INTERNATIONAL_ENGLISH.data ||
+                                      lang_region2 == languages::INTERNATIONAL_ENGLISH.data {
+                                4 + self.match_distance_script(other)
+                            } else {
+                                5 + self.match_distance_script(other)
+                            }
+                        } else if lang1 == languages::SPANISH.data &&
+                                  lang2 == languages::SPANISH.data {
+                            if lang_region1 == languages::EUROPEAN_SPANISH.data ||
+                               lang_region2 == languages::EUROPEAN_SPANISH.data {
+                                8 + self.match_distance_script(other)
+                            } else if lang_region1 == languages::LATIN_AMERICAN_SPANISH.data ||
+                                      lang_region2 == languages::LATIN_AMERICAN_SPANISH.data {
+                                4 + self.match_distance_script(other)
+                            } else {
+                                5 + self.match_distance_script(other)
+                            }
+                        } else {
+                            4 + self.match_distance_script(other)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn match_distance(&self, other: LanguageCode) -> i32 {
+        self.maximize().match_distance_region(other.maximize())
+    }
 }
 
 impl FromStr for LanguageCode {
@@ -167,6 +291,14 @@ impl FromStr for LanguageCode {
     fn from_str(s: &str) -> Result<LanguageCode, LanguageCodeError> {
         LanguageCode::parse(&s)
     }
+}
+
+
+/// A convenient function for declaring language codes from literals.
+/// Parses the given string as a language code, and panics if it does
+/// not parse.
+pub fn lang(s: &str) -> LanguageCode {
+    LanguageCode::parse(&s).unwrap()
 }
 
 #[cfg(test)]
@@ -195,6 +327,12 @@ mod tests {
     fn minimizes_to(input: &str, result: &str) {
         let code: LanguageCode = input.parse().unwrap();
         assert_eq!(code.minimize().to_string(), result.to_string());
+    }
+
+    fn distance(lang1: &str, lang2: &str, dist: i32) {
+        let code1: LanguageCode = lang1.parse().unwrap();
+        let code2: LanguageCode = lang2.parse().unwrap();
+        assert_eq!(code1.match_distance(code2), dist)
     }
 
     #[test]
@@ -254,5 +392,18 @@ mod tests {
         minimizes_to("vai-Vaii-LR", "vai");
         minimizes_to("pt-Latn-PT", "pt-PT");
         minimizes_to("zh-Latn-US", "zh-Latn-US");
+    }
+
+    #[test]
+    fn test_distance() {
+        distance("no", "no", 0);
+        distance("en", "en-Latn", 0);
+        distance("en-US", "en-GB", 6);
+        distance("ta", "en", 14);
+        distance("mg", "fr", 14);
+        distance("zh-Hans", "zh-Hant", 19);
+        distance("zh-Hant", "zh-Hans", 23);
+        distance("en", "en-Shaw", 46);
+        distance("en", "ja", 124);
     }
 }

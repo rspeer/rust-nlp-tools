@@ -1,3 +1,5 @@
+use std::mem::transmute;
+
 pub const LANGUAGE_MASK: u64 = 0x7fff_0000_0000_0000_u64;
 pub const PROTO_MASK: u64 = 0x0000_8000_0000_0000_u64;
 pub const EXTLANG_MASK: u64 = 0x0000_7fff_0000_0000_u64;
@@ -262,6 +264,19 @@ fn is_extlang(subtag: &str) -> bool {
     } else {
         false
     }
+}
+
+pub fn language_pair_bytes(tag1: u64, tag2: u64) -> [u8; 16] {
+    let bytes1: [u8; 8] = unsafe { transmute(tag1.to_be()) };
+    let bytes2: [u8; 8] = unsafe { transmute(tag2.to_be()) };
+    let mut bytes: [u8; 16] = [0; 16];
+    for i in 0..8 {
+        bytes[i] = bytes1[i];
+    }
+    for i in 8..16 {
+        bytes[i] = bytes2[i - 8];
+    }
+    bytes
 }
 
 
