@@ -70,6 +70,14 @@ impl LanguageCode {
                     }
                     None => {}
                 }
+
+                // The only script replacement is Qaai -> Zinh.
+                // (I don't even know when you would use this.)
+                let script_val: u64 = val & SCRIPT_MASK;
+                if script_val == languages::INHERIT_SCRIPT_OLD.data {
+                    val = update_tag(val, languages::INHERIT_SCRIPT.data);
+                }
+
                 let region_val: u64 = val & REGION_MASK;
                 match langdata::REGION_REPLACE.get(&region_val) {
                     Some(&newregion) => {
