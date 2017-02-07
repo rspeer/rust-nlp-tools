@@ -398,6 +398,8 @@ mod tests {
     fn test_distance() {
         distance("no", "no", 0);
         distance("en", "en-Latn", 0);
+        distance("en-US", "en-PR", 4);
+        distance("en-GB", "en-IN", 4);
         distance("en-US", "en-GB", 6);
         distance("ta", "en", 14);
         distance("mg", "fr", 14);

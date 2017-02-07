@@ -143,3 +143,10 @@ zh-Hans,zh-Hant,15,one
 zh-Hant,zh-Hans,19,one
 zh-Hant-HK,zh-Hant-MO,3,one
 pt-Latn-BR,pt-Latn-US,4,sym
+en-Latn-US,en-Latn-AS,4,sym
+en-Latn-US,en-Latn-GU,4,sym
+en-Latn-US,en-Latn-MH,4,sym
+en-Latn-US,en-Latn-MP,4,sym
+en-Latn-US,en-Latn-PR,4,sym
+en-Latn-US,en-Latn-UM,4,sym
+en-Latn-US,en-Latn-VI,4,sym
