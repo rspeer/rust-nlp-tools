@@ -214,18 +214,18 @@ pub fn decode_tag(val: u64) -> String {
     parts.join("-")
 }
 
-pub fn update_tag(old_tag: u64, new_tag: u64) -> u64 {
+pub fn update_code(old_val: u64, new_val: u64) -> u64 {
     let mut update_mask: u64 = 0;
-    if new_tag & LANGUAGE_EXT_MASK != 0 {
+    if new_val & LANGUAGE_EXT_MASK != 0 {
         update_mask |= LANGUAGE_EXT_MASK;
     }
-    if new_tag & SCRIPT_MASK != 0 {
+    if new_val & SCRIPT_MASK != 0 {
         update_mask |= SCRIPT_MASK;
     }
-    if new_tag & REGION_MASK != 0 {
+    if new_val & REGION_MASK != 0 {
         update_mask |= REGION_MASK;
     }
-    (old_tag & !update_mask) | (new_tag & update_mask)
+    (old_val & !update_mask) | (new_val & update_mask)
 }
 
 fn check_characters(subtag: &str) -> bool {

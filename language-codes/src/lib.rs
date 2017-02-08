@@ -5,7 +5,7 @@ extern crate language_tag_parser;
 use std::str::FromStr;
 use std::fmt;
 pub use language_tag_parser::{LanguageCodeError, encode_tag, decode_tag, decode_language,
-                              decode_extlang, decode_script, decode_region, update_tag,
+                              decode_extlang, decode_script, decode_region, update_code,
                               language_pair_bytes, LANGUAGE_MASK, LANGUAGE_EXT_MASK, SCRIPT_MASK,
                               REGION_MASK, INHERIT_SCRIPT, INHERIT_SCRIPT_OLD, EMPTY_CODE};
 pub mod langdata;
@@ -34,19 +34,32 @@ impl LanguageCode {
 
     /// Get the 2- or 3-character language subtag as a String, giving "und" if
     /// the language is unknown.
-    pub fn language_subtag(&self) -> String {
+    pub fn language_subtag(self) -> String {
         decode_language(self.data)
     }
 
     /// Get the 2- or 3-character language code as an Option<String>, giving
     /// None if the language is unknown.
-    pub fn get_language(&self) -> Option<String> {
+    pub fn get_language(self) -> Option<String> {
         let subtag = self.language_subtag();
         if subtag == "und" { None } else { Some(subtag) }
     }
 
-    pub fn get_extlang(&self) -> Option<String> {
+    /// Get the extlang subtag, if present. For example, Proto-Indo-European
+    /// has the tag "ine-pro" with the extlang "pro". For most languages,
+    /// this will be `None`.
+    pub fn get_extlang(self) -> Option<String> {
         decode_extlang(self.data)
+    }
+
+    /// Remove information about script and region from this language code,
+    /// leaving a code that only distinguishes the language itself. This can
+    /// be useful in a match statement in NLP applications that only need
+    /// to distinguish the language. However, you lose the benefit of
+    /// language matching -- when languages are nearly the same, such as
+    /// `ms` and `id`, you need to match both explicitly.
+    pub fn language_only(self) -> LanguageCode {
+        LanguageCode { data: self.data & LANGUAGE_EXT_MASK }
     }
 
     /// Get the 4-character script code as an Option<String>, giving None
@@ -81,7 +94,7 @@ impl LanguageCode {
                         // the old and new tag provide a subtag, keep the new
                         // value for the language subtag, or the old value for
                         // any other subtag.
-                        val = update_tag(update_tag(val, newlang), val & !LANGUAGE_EXT_MASK);
+                        val = update_code(update_code(val, newlang), val & !LANGUAGE_EXT_MASK);
                     }
                     None => {}
                 }
@@ -90,13 +103,13 @@ impl LanguageCode {
                 // (I don't even know when you would use this.)
                 let script_val: u64 = val & SCRIPT_MASK;
                 if script_val == INHERIT_SCRIPT_OLD {
-                    val = update_tag(val, INHERIT_SCRIPT);
+                    val = update_code(val, INHERIT_SCRIPT);
                 }
 
                 let region_val: u64 = val & REGION_MASK;
                 match langdata::REGION_REPLACE.get(&region_val) {
                     Some(&newregion) => {
-                        val = update_tag(val, newregion);
+                        val = update_code(val, newregion);
                     }
                     None => {}
                 }
@@ -106,7 +119,7 @@ impl LanguageCode {
     }
 
     /// Get a sequence of more general versions of this code.
-    pub fn broaden(&self) -> Vec<LanguageCode> {
+    pub fn broaden(self) -> Vec<LanguageCode> {
         let possibilities = vec![self.data & (LANGUAGE_MASK | SCRIPT_MASK | REGION_MASK),
                                  self.data & (LANGUAGE_MASK | REGION_MASK),
                                  self.data & (LANGUAGE_MASK | SCRIPT_MASK),
@@ -123,11 +136,11 @@ impl LanguageCode {
     /// likely values based on the values that are specified. For example,
     /// "pt" maximizes to "pt-Latn-BR". This is the "maximize" or "add likely
     /// subtags" operation defined in UTS #35.
-    pub fn maximize(&self) -> Self {
+    pub fn maximize(self) -> Self {
         if (self.data & LANGUAGE_MASK != 0) && (self.data & SCRIPT_MASK != 0) &&
            (self.data & REGION_MASK != 0) {
             // We can tell this code is already maximal.
-            return self.clone();
+            return self;
         } else {
             match langdata::LIKELY_SUBTAGS.get(&self.data) {
                 Some(&max) => {
@@ -138,7 +151,7 @@ impl LanguageCode {
             for broader_code in self.broaden() {
                 match langdata::LIKELY_SUBTAGS.get(&broader_code.data) {
                     Some(&max) => {
-                        return LanguageCode::new(update_tag(max, self.data));
+                        return LanguageCode::new(update_code(max, self.data));
                     }
                     None => {}
                 }
@@ -153,7 +166,7 @@ impl LanguageCode {
     /// We favor scripts over regions -- that is, zh-Hans, not zh-TW. This avoids
     /// returning un-normalized tags (zh-TW is aliased to zh-Hans-TW anyway),
     /// and is more symmetric with `maximize()`.
-    pub fn minimize(&self) -> Self {
+    pub fn minimize(self) -> Self {
         let max = self.maximize();
         let possibilities = vec![self.data & LANGUAGE_MASK,
                                  self.data & (LANGUAGE_MASK | SCRIPT_MASK),
@@ -164,12 +177,14 @@ impl LanguageCode {
                 return code;
             }
         }
-        return self.clone();
+        return self;
     }
 
-    fn match_distance_language(&self, other: LanguageCode) -> i32 {
-        let lang1: u64 = self.data & LANGUAGE_MASK;
-        let lang2: u64 = other.data & LANGUAGE_MASK;
+    /// Get the distance between two maximized language codes,
+    /// comparing just the language portion.
+    fn match_distance_language(self, other: LanguageCode) -> i32 {
+        let lang1: u64 = self.data & LANGUAGE_EXT_MASK;
+        let lang2: u64 = other.data & LANGUAGE_EXT_MASK;
         if lang1 == lang2 {
             0
         } else {
@@ -181,20 +196,31 @@ impl LanguageCode {
         }
     }
 
-    fn match_distance_script(&self, other: LanguageCode) -> i32 {
-        let lang1: u64 = self.data & LANGUAGE_MASK;
-        let lang2: u64 = other.data & LANGUAGE_MASK;
+    /// Get the distance between two maximized language codes,
+    /// disregarding the region (which has already been checked)
+    /// and comparing them at the script level.
+    fn match_distance_script(self, other: LanguageCode) -> i32 {
+        let lang1: u64 = self.data & LANGUAGE_EXT_MASK;
+        let lang2: u64 = other.data & LANGUAGE_EXT_MASK;
         let script1: u64 = self.data & SCRIPT_MASK;
         let script2: u64 = other.data & SCRIPT_MASK;
         if (lang1 | script1) == (lang2 | script2) {
             0
         } else if script1 == script2 {
+            // When the scripts are the same, go on to matching the language.
+            // We can check this first because there's nothing in matching.txt
+            // that would give a different result than this, in the case of
+            // different languages and the same script.
             self.match_distance_language(other)
         } else {
             let pair = language_pair_bytes(lang1 | script1, lang2 | script2);
             match langdata::MATCH_DISTANCE.get(&pair) {
                 Some(&dist) => dist,
                 None => {
+                    // The one wildcard rule that applies to scripts is about
+                    // matching Simplified Chinese vs. Traditional Chinese
+                    // characters. It's a bad match, but the Traditional ->
+                    // Simplified direction is slightly worse.
                     if script1 == SIMPLIFIED && script2 == TRADITIONAL {
                         15 + self.match_distance_language(other)
                     } else if script1 == TRADITIONAL && script2 == SIMPLIFIED {
@@ -207,33 +233,54 @@ impl LanguageCode {
         }
     }
 
-    fn match_distance_region(&self, other: LanguageCode) -> i32 {
-        let bigmask: u64 = LANGUAGE_MASK | SCRIPT_MASK | REGION_MASK;
-        let reduced1 = self.data & bigmask;
-        let reduced2 = other.data & bigmask;
-        if reduced1 == reduced2 {
+    /// Get the distance between two maximized language codes, starting
+    /// by comparing them at the region level. Either we'll find a known
+    /// distance for the language/script/region triples, or we'll
+    /// compute a distance for just the region part, and pass the rest
+    /// to `match_distance_script`.
+    fn match_distance_region(self, other: LanguageCode) -> i32 {
+        if self.data == other.data {
+            // These codes are the same, so the distance is exactly 0.
             0
         } else {
-            let pair = language_pair_bytes(reduced1, reduced2);
+            // Convert this pair of languages to the form that can be looked
+            // up in our pre-computed hashtable, and look it up to see if
+            // it's a known distance.
+            let pair = language_pair_bytes(self.data, other.data);
             match langdata::MATCH_DISTANCE.get(&pair) {
                 Some(&dist) => dist,
                 None => {
-                    println!("{} -> {}", self, other);
-                    let lang1: u64 = self.data & LANGUAGE_MASK;
-                    let lang2: u64 = other.data & LANGUAGE_MASK;
+                    // There's no exact match, so we need to compute a region
+                    // distance.
+                    let lang1: u64 = self.data & LANGUAGE_EXT_MASK;
+                    let lang2: u64 = other.data & LANGUAGE_EXT_MASK;
                     let region1: u64 = self.data & REGION_MASK;
                     let region2: u64 = other.data & REGION_MASK;
                     if region1 == region2 {
+                        // If the regions are the same, the region adds 0 distance.
+                        // Return just the distance from `match_distance_script()`.
                         self.match_distance_script(other)
                     } else {
+                        // There are several wildcard rules that match at the region
+                        // level, and the following code implements them (instead of
+                        // a system for matching languages on CLDR's wildcard rules,
+                        // which would be inefficient).
+                        //
+                        // After matching a wildcard rule, we still need to add the
+                        // distance that comes from the language and script.
                         let lang_region1 = lang1 | region1;
                         let lang_region2 = lang2 | region2;
                         if lang1 == languages::PORTUGUESE.data &&
                            lang2 == languages::PORTUGUESE.data {
-                            // A specific match is defined between two codes for "New World"
-                            // Portuguese, pt-BR and pt-US. If only one of the codes is
-                            // "New World", the match is worse than two forms of European
-                            // Portuguese.
+                            // The wildcard rules for matching Portuguese imply that
+                            // regions of Portuguese match with a distance of 4 only
+                            // if they're both "New World" or both "Old World".
+                            //
+                            // The only kinds of "New World" Portuguese defined by CLDR
+                            // are pt-BR and pt-US, and the specific match between those
+                            // is given a value of 4 in matching.txt. If one of these
+                            // is matched with any other kind of Portuguese, it gets
+                            // a distance of 8.
                             if lang_region1 == languages::BRAZILIAN_PORTUGUESE.data ||
                                lang_region2 == languages::BRAZILIAN_PORTUGUESE.data {
                                 8 + self.match_distance_script(other)
@@ -245,6 +292,10 @@ impl LanguageCode {
                             }
                         } else if lang1 == languages::ENGLISH.data &&
                                   lang2 == languages::ENGLISH.data {
+                            // British English (en-GB) is a close match for many variants
+                            // of English in the world, such as en-IN, and these are also a
+                            // close match for "International English" (en-001). American
+                            // English is farther away from all of these.
                             if lang_region1 == languages::AMERICAN_ENGLISH.data ||
                                lang_region2 == languages::AMERICAN_ENGLISH.data {
                                 6 + self.match_distance_script(other)
@@ -259,6 +310,10 @@ impl LanguageCode {
                             }
                         } else if lang1 == languages::SPANISH.data &&
                                   lang2 == languages::SPANISH.data {
+                            // European Spanish (es-ES) is farther away from other regional
+                            // variants of Spanish than they are from each other.
+                            // Latin American Spanish (es-419) is a close match for everything
+                            // but es-ES.
                             if lang_region1 == languages::EUROPEAN_SPANISH.data ||
                                lang_region2 == languages::EUROPEAN_SPANISH.data {
                                 8 + self.match_distance_script(other)
@@ -269,6 +324,8 @@ impl LanguageCode {
                                 5 + self.match_distance_script(other)
                             }
                         } else {
+                            // In languages with no specific wildcard rules, a difference in
+                            // region only adds 4 distance.
                             4 + self.match_distance_script(other)
                         }
                     }
@@ -277,7 +334,13 @@ impl LanguageCode {
         }
     }
 
-    pub fn match_distance(&self, other: LanguageCode) -> i32 {
+    /// Return a number representing the distance between this language
+    /// code (the desired language) and another (the available language).
+    ///
+    /// A distance of 0 indicates an exact match. Distances up to 10 are
+    /// minor variations, and distances up to 20 or 25 should still be
+    /// comprehensible.
+    pub fn match_distance(self, other: LanguageCode) -> i32 {
         self.maximize().match_distance_region(other.maximize())
     }
 }
@@ -311,7 +374,7 @@ mod tests {
         assert_eq!(code.get_language(), Some("zh".to_string()));
         assert_eq!(code.get_script(), Some("Hant".to_string()));
         assert_eq!(code.get_region(), Some("TW".to_string()));
-        assert_eq!(code.to_string(), "zh-Hant-TW".to_string());
+        assert_eq!(code.to_string(), "zh-Hant-TW");
     }
 
     fn parses_as(input: &str, result: &str) {
@@ -329,7 +392,7 @@ mod tests {
         assert_eq!(code.minimize().to_string(), result.to_string());
     }
 
-    fn distance(lang1: &str, lang2: &str, dist: i32) {
+    fn check_distance(lang1: &str, lang2: &str, dist: i32) {
         let code1: LanguageCode = lang1.parse().unwrap();
         let code2: LanguageCode = lang2.parse().unwrap();
         assert_eq!(code1.match_distance(code2), dist)
@@ -371,6 +434,9 @@ mod tests {
 
         let lcode: LanguageCode = "zh-hant-hk".parse().unwrap();
         assert_eq!(lcode, languages::HONG_KONG_CHINESE);
+
+        assert_eq!(languages::BRAZILIAN_PORTUGUESE.language_only(),
+                   languages::PORTUGUESE);
     }
 
     #[test]
@@ -396,16 +462,27 @@ mod tests {
 
     #[test]
     fn test_distance() {
-        distance("no", "no", 0);
-        distance("en", "en-Latn", 0);
-        distance("en-US", "en-PR", 4);
-        distance("en-GB", "en-IN", 4);
-        distance("en-US", "en-GB", 6);
-        distance("ta", "en", 14);
-        distance("mg", "fr", 14);
-        distance("zh-Hans", "zh-Hant", 19);
-        distance("zh-Hant", "zh-Hans", 23);
-        distance("en", "en-Shaw", 46);
-        distance("en", "ja", 124);
+        check_distance("no", "no", 0);
+        check_distance("no", "nb", 0);
+        check_distance("en", "en-Latn", 0);
+        check_distance("en-US", "en-PR", 4);
+        check_distance("en-GB", "en-IN", 4);
+        check_distance("en-US", "en-GB", 6);
+        check_distance("ta", "en", 14);
+        check_distance("mg", "fr", 14);
+        check_distance("zh-Hans", "zh-Hant", 19);
+        check_distance("zh-Hant", "zh-Hans", 23);
+        check_distance("en", "en-Shaw", 46);
+        check_distance("en", "ja", 124);
+    }
+
+    #[test]
+    fn test_distance_named() {
+        assert_eq!(languages::NORWEGIAN_BOKMAL.match_distance(languages::NORWEGIAN),
+                   1);
+        assert_eq!(languages::AMERICAN_ENGLISH.match_distance(languages::BRITISH_ENGLISH),
+                   6);
+        assert_eq!(languages::CHINESE.match_distance(languages::TRADITIONAL_CHINESE),
+                   19);
     }
 }
