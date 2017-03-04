@@ -335,15 +335,99 @@ impl LanguageCode {
     }
 
     /// Return a number representing the distance between this language
-    /// code (the desired language) and another (the available language).
+    /// code (the desired language) and another (the supported language).
     ///
     /// A distance of 0 indicates an exact match. Distances up to 10 are
     /// minor variations, and distances up to 20 or 25 should still be
-    /// comprehensible.
+    /// comprehensible, if potentially unsatisfying to the user.
+    /// The distance between completely unrelated languages is 124.
     pub fn match_distance(self, other: LanguageCode) -> i32 {
         self.maximize().match_distance_region(other.maximize())
     }
+
+    pub fn find_match(self,
+                      rank_penalty: i32,
+                      cutoff: i32,
+                      possibilities: &Vec<LanguageCode>)
+                      -> (LanguageCode, i32) {
+        let mut rank_cost: i32 = 0;
+        let mut best_match: LanguageCode = languages::UNKNOWN;
+        let mut best_distance: i32 = 1000;
+        let mut best_cost: i32 = 1000;
+
+        for &other in possibilities {
+            let distance: i32 = self.match_distance(other);
+            let cost: i32 = distance + rank_cost;
+            if distance == 0 {
+                return (other, 0);
+            }
+            if distance < cutoff && cost < best_cost {
+                best_match = other;
+                best_cost = cost;
+                best_distance = distance;
+            }
+            rank_cost += rank_penalty;
+            if rank_cost >= best_cost {
+                break;
+            }
+        }
+        (best_match, best_distance)
+    }
+
+    pub fn match_desired_with_cutoff(self,
+                                     cutoff: i32,
+                                     desired: &Vec<LanguageCode>)
+                                     -> (LanguageCode, i32) {
+        self.find_match(5, cutoff, desired)
+    }
+
+    pub fn match_desired(self, desired: &Vec<LanguageCode>) -> (LanguageCode, i32) {
+        self.find_match(5, 25, desired)
+    }
+
+    pub fn match_supported_with_cutoff(self,
+                                       cutoff: i32,
+                                       supported: &Vec<LanguageCode>)
+                                       -> (LanguageCode, i32) {
+        for &other in supported {
+            if other == self {
+                return (other, 0);
+            }
+        }
+        self.find_match(0, cutoff, supported)
+    }
+
+    pub fn match_supported(self, supported: &Vec<LanguageCode>) -> (LanguageCode, i32) {
+        self.find_match(0, 25, supported)
+    }
 }
+
+
+pub fn match_lists_with_cutoff(rank_penalty: i32,
+                               cutoff: i32,
+                               desired: &Vec<LanguageCode>,
+                               supported: &Vec<LanguageCode>)
+                               -> (LanguageCode, i32) {
+    let mut rank_cost: i32 = 0;
+    let mut best_match: LanguageCode = languages::UNKNOWN;
+    let mut best_distance: i32 = 1000;
+    let mut best_cost: i32 = 1000;
+    for &d in desired {
+        let (matched, distance) = d.match_supported_with_cutoff(cutoff, supported);
+        let cost: i32 = distance + rank_cost;
+        if distance < cutoff && cost < best_cost {
+            best_match = d;
+            best_cost = cost;
+            best_distance = distance;
+        }
+        rank_cost += rank_penalty;
+        if rank_cost >= best_cost {
+            break;
+        }
+    }
+    (best_match, best_distance)
+}
+
 
 impl FromStr for LanguageCode {
     type Err = LanguageCodeError;
@@ -371,7 +455,7 @@ mod tests {
     #[test]
     fn test_parse() {
         let code: LanguageCode = "zh-hant-tw".parse().unwrap();
-        assert_eq!(code.get_language(), Some("zh".to_string()));
+        assert_eq!(code.get_language(), Some("zh"));
         assert_eq!(code.get_script(), Some("Hant".to_string()));
         assert_eq!(code.get_region(), Some("TW".to_string()));
         assert_eq!(code.to_string(), "zh-Hant-TW");
@@ -379,17 +463,17 @@ mod tests {
 
     fn parses_as(input: &str, result: &str) {
         let code: LanguageCode = input.parse().unwrap();
-        assert_eq!(code.to_string(), result.to_string());
+        assert_eq!(code.to_string(), result);
     }
 
     fn maximizes_to(input: &str, result: &str) {
         let code: LanguageCode = input.parse().unwrap();
-        assert_eq!(code.maximize().to_string(), result.to_string());
+        assert_eq!(code.maximize().to_string(), result);
     }
 
     fn minimizes_to(input: &str, result: &str) {
         let code: LanguageCode = input.parse().unwrap();
-        assert_eq!(code.minimize().to_string(), result.to_string());
+        assert_eq!(code.minimize().to_string(), result);
     }
 
     fn check_distance(lang1: &str, lang2: &str, dist: i32) {
